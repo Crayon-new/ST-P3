@@ -133,10 +133,10 @@ class STP3(nn.Module):
         output = {}
 
         # Only process features from the past and present
-        image = image[:, :self.receptive_field].contiguous()
-        intrinsics = intrinsics[:, :self.receptive_field].contiguous()
-        extrinsics = extrinsics[:, :self.receptive_field].contiguous()
-        future_egomotion = future_egomotion[:, :self.receptive_field].contiguous()
+        image = image[:, :self.receptive_field].contiguous() # (B2, F3, V6, C3, H224, W480) for nus
+        intrinsics = intrinsics[:, :self.receptive_field].contiguous() # (B2, F3, V6, 3, 3) for nus
+        extrinsics = extrinsics[:, :self.receptive_field].contiguous() # (B2, F3, V6, 4, 4) for nus
+        future_egomotion = future_egomotion[:, :self.receptive_field].contiguous() #(2, 3, 6)
 
         # Lifting features and project to bird's-eye view
         x, depth, cam_front = self.calculate_birds_eye_view_features(image, intrinsics, extrinsics, future_egomotion) # (3,3,64,200,200)
@@ -170,7 +170,7 @@ class STP3(nn.Module):
                 future_prediction_input = present_state.new_zeros(b, 1, self.latent_dim, h, w)
 
             # predict the future
-            states = self.future_prediction(future_prediction_input, states)
+            states = self.future_prediction(future_prediction_input, states) #(2, 9, 64, 200, 200)
 
             # predict BEV outputs
             bev_output = self.decoder(states)

@@ -136,7 +136,7 @@ def eval(checkpoint_path, dataroot):
                 cur_time = (i+1)*2
                 metric_planning_val[i](final_traj[:,:cur_time].detach(), labels['gt_trajectory'][:,1:cur_time+1], occupancy[:,:cur_time])
 
-        if index % 100 == 0:
+        if index % 50 == 0:
             save(output, labels, batch, n_present, index, save_path)
 
 
@@ -182,9 +182,9 @@ def save(output, labels, batch, n_present, frame, save_path):
 
     val_w = 2.99
     val_h = 2.99 * (224. / 480.)
-    plt.figure(1, figsize=(4*val_w,2*val_h))
-    width_ratios = (val_w,val_w,val_w,val_w)
-    gs = matplotlib.gridspec.GridSpec(2, 4, width_ratios=width_ratios)
+    plt.figure(1, figsize=(3*val_w,4*val_h))
+    width_ratios = (val_w,val_w,val_w)
+    gs = matplotlib.gridspec.GridSpec(4, 3, width_ratios=width_ratios)
     gs.update(wspace=0.0, hspace=0.0, left=0.0, right=1.0, top=1.0, bottom=0.0)
 
     plt.subplot(gs[0, 0])
@@ -217,13 +217,13 @@ def save(output, labels, batch, n_present, frame, save_path):
     plt.axis('off')
 
     plt.subplot(gs[1, 2])
-    plt.annotate('BACK', (0.01, 0.87), c='white', xycoords='axes fraction', fontsize=14)
+    plt.annotate('BACK_RIGHT', (0.01, 0.87), c='white', xycoords='axes fraction', fontsize=14)
     showing = denormalise_img(images[0, n_present - 1, 5].cpu())
     showing = showing.transpose(Image.FLIP_LEFT_RIGHT)
     plt.imshow(showing)
     plt.axis('off')
 
-    plt.subplot(gs[:, 3])
+    plt.subplot(gs[2:, 0])
     showing = torch.zeros((200, 200, 3)).numpy()
     showing[:, :] = np.array([219 / 255, 215 / 255, 215 / 255])
 
@@ -266,6 +266,44 @@ def save(output, labels, batch, n_present, frame, save_path):
     plt.ylim((0, 200))
     gt_trajs[0, :, :1] = gt_trajs[0, :, :1] * -1
     gt_trajs = (gt_trajs[0, :, :2].cpu().numpy() - bx) / dx
+    plt.plot(gt_trajs[:, 0], gt_trajs[:, 1], linewidth=3.0)
+
+    # groud truth representations
+    hdmap = labels['hdmap'].detach()
+
+    plt.subplot(gs[2:, 1])
+    showing = torch.zeros((200, 200, 3)).numpy()
+    showing[:, :] = np.array([219 / 255, 215 / 255, 215 / 255])
+
+    # drivable
+    area = hdmap[0, 0:2][1].cpu().numpy()
+    hdmap_index = area > 0
+    showing[hdmap_index] = np.array([161 / 255, 158 / 255, 158 / 255])
+
+    # lane
+    area = hdmap[0, 0:2][0].cpu().numpy()
+    hdmap_index = area > 0
+    showing[hdmap_index] = np.array([84 / 255, 70 / 255, 70 / 255])
+
+    # semantic
+    segmentation = labels['segmentation'][:, n_present - 1].detach()
+    semantic_seg = segmentation[0][0].cpu().numpy()
+    semantic_index = semantic_seg > 0
+    showing[semantic_index] = np.array([255 / 255, 128 / 255, 0 / 255])
+
+    pedestrian = labels['pedestrian'][:, n_present - 1].detach()
+    pedestrian_seg = pedestrian[0][0].cpu().numpy()
+    pedestrian_index = pedestrian_seg > 0
+    showing[pedestrian_index] = np.array([28 / 255, 81 / 255, 227 / 255])
+
+    plt.imshow(make_contour(showing))
+    plt.axis('off')
+
+    plt.fill(pts[:, 0], pts[:, 1], '#76b900')
+
+    plt.xlim((200, 0))
+    plt.ylim((0, 200))
+
     plt.plot(gt_trajs[:, 0], gt_trajs[:, 1], linewidth=3.0)
 
     plt.savefig(save_path / ('%04d.png' % frame))
