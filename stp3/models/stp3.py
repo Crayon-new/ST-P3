@@ -46,6 +46,9 @@ class STP3(nn.Module):
         # Encoder
         self.encoder = Encoder(cfg=self.cfg.MODEL.ENCODER, D=self.depth_channels)
 
+        self.mean_conv = nn.Conv2d(self.encoder_out_channels, self.encoder_out_channels , 1)
+        self.sigma_conv = nn.Conv2d(self.encoder_out_channels, self.encoder_out_channels, 1)
+
         # Temporal model
         temporal_in_channels = self.encoder_out_channels
         if self.cfg.MODEL.TEMPORAL_MODEL.INPUT_EGOPOSE:
@@ -152,7 +155,8 @@ class STP3(nn.Module):
             x = torch.cat([x, future_egomotions_spatial], dim=-3)
 
         #  Temporal model
-        states = self.temporal_model(x)
+        states = self.temporal_model(x) # include 3 past feature
+        mean_states, sigma_states, states = self.distribution_forward_2(states)
 
         if self.n_future > 0:
             present_state = states[:, -1:].contiguous()
@@ -179,7 +183,7 @@ class STP3(nn.Module):
             # Perceive BEV outputs
             bev_output = self.decoder(states)
 
-        output = {**output, **bev_output}
+        output = {**output, **bev_output, "mean_states": mean_states, "sigma_states": sigma_states}
 
         return output
 
@@ -316,6 +320,16 @@ class STP3(nn.Module):
 
         x = self.projection_to_birds_eye_view(x, geometry, future_egomotion)
         return x, depth, cam_front
+    
+    def distribution_forward_2(self, states):
+        b, n, c, h, w = states.shape
+        states = states.view(b * n, c, h, w)
+        mean_states = self.mean_conv(states)
+        sigma_states = self.sigma_conv(states)
+        sample_states = mean_states + sigma_states.mul(0.5).exp_() * torch.randn_like(mean_states)
+        sample_states = sample_states.view(b, n, *sample_states.shape[1:])
+        return mean_states, sigma_states, sample_states
+
 
     def distribution_forward(self, present_features, min_log_sigma, max_log_sigma):
         """

@@ -121,6 +121,9 @@ class TrainingModule(pl.LightningModule):
         #####
         loss = {}
         if is_train:
+            # kl_loss
+            loss['KL_loss'] = (-0.5*output['sigma_states']+0.5*(output['sigma_states'].exp()+torch.square(output['mean_states']))).mean() * 0.1
+
             # segmentation
             segmentation_factor = 1 / (2 * torch.exp(self.model.segmentation_weight))
             loss['segmentation'] = segmentation_factor * self.losses_fn['segmentation'](
