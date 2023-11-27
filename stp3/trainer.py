@@ -122,7 +122,17 @@ class TrainingModule(pl.LightningModule):
         loss = {}
         if is_train:
             # kl_loss
-            loss['KL_loss'] = (-0.5*output['sigma_states']+0.5*(output['sigma_states'].exp()+torch.square(output['mean_states']))).mean() * 0.1
+            # Only consider the drivable area
+            # mask = labels['hdmap'][:, 0] == 1
+            # mask = mask.unsqueeze(1).repeat(1, 3, 1, 1)
+            # output['sigma_states'] = output['sigma_states'].view(B, self.model.receptive_field, *output['sigma_states'].shape[1:])
+            # output['sigma_states'] = output['sigma_states'].permute(0, 1, 3, 4, 2)
+            # output['sigma_states'] = output['sigma_states'][mask]
+            # output['mean_states'] = output['mean_states'].view(B, self.model.receptive_field, *output['mean_states'].shape[1:])
+            # output['mean_states'] = output['mean_states'].permute(0, 1, 3, 4, 2)
+            # output['mean_states'] = output['mean_states'][mask]
+
+            loss['KL_loss'] = (-0.5*output['sigma_states']+0.5*(output['sigma_states'].exp()+torch.square(output['mean_states']))).mean() * self.cfg.COST_FUNCTION.KLLoss_WEIGHT
 
             # segmentation
             segmentation_factor = 1 / (2 * torch.exp(self.model.segmentation_weight))
