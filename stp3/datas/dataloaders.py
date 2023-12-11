@@ -6,7 +6,7 @@ from stp3.datas.CarlaData import CarlaDataset
 
 
 def prepare_dataloaders(cfg, return_dataset=False):
-    if cfg.DATASET.NAME == 'nuscenes':
+    if cfg.DATASET.NAME == 'nuscene' or cfg.DATASET.NAME == 'nuscenes':
         # 28130 train and 6019 val
         dataroot = cfg.DATASET.DATAROOT
         nusc = NuScenes(version='v1.0-{}'.format(cfg.DATASET.VERSION), dataroot=dataroot, verbose=False)

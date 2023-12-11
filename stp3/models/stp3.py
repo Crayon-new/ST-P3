@@ -2,15 +2,18 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+import time
 
 from stp3.models.encoder import Encoder
 from stp3.models.temporal_model import TemporalModelIdentity, TemporalModel
 from stp3.models.distributions import DistributionModule
 from stp3.models.future_prediction import FuturePrediction
+from stp3.models.variance_net import VarianceNet
 from stp3.models.decoder import Decoder
 from stp3.models.planning_model import Planning
 from stp3.utils.network import pack_sequence_dim, unpack_sequence_dim, set_bn_momentum
 from stp3.utils.geometry import calculate_birds_eye_view_parameters, VoxelsSumming, pose_vec2mat
+
 
 class STP3(nn.Module):
     def __init__(self, cfg):
@@ -47,7 +50,7 @@ class STP3(nn.Module):
         self.encoder = Encoder(cfg=self.cfg.MODEL.ENCODER, D=self.depth_channels)
 
         self.mean_conv = nn.Conv2d(self.encoder_out_channels, self.encoder_out_channels , 1)
-        self.sigma_conv = nn.Conv2d(self.encoder_out_channels, self.encoder_out_channels, 1)
+        self.sigma_block = VarianceNet(self.encoder_out_channels, 2*self.encoder_out_channels,  self.encoder_out_channels)
 
         # Temporal model
         temporal_in_channels = self.encoder_out_channels
@@ -156,7 +159,6 @@ class STP3(nn.Module):
 
         #  Temporal model
         states = self.temporal_model(x) # include 3 past feature
-        mean_states, sigma_states, states = self.distribution_forward_2(states)
 
         if self.n_future > 0:
             present_state = states[:, -1:].contiguous()
@@ -178,12 +180,21 @@ class STP3(nn.Module):
 
             # predict BEV outputs
             bev_output = self.decoder(states)
+            output = {**output, **bev_output}
 
         else:
             # Perceive BEV outputs
-            bev_output = self.decoder(states)
-
-        output = {**output, **bev_output, "mean_states": mean_states, "sigma_states": sigma_states}
+            if self.cfg.MODEL.SAMPLE_RESULTS:
+                start = time.time()
+                bev_output, heat_map, mean_states, sigma_states = self.get_sample_results(states)
+                end = time.time()
+                execution_time = end - start
+                print(f"执行时间: {execution_time} 秒")
+                output = {**output, **bev_output, "mean_states": mean_states, "sigma_states": sigma_states, "heat_map": heat_map}
+            else:
+                mean_states, sigma_states, states = self.distribution_forward_2(states)
+                bev_output = self.decoder(states)
+                output = {**output, **bev_output, "mean_states": mean_states, "sigma_states": sigma_states}
 
         return output
 
@@ -325,10 +336,47 @@ class STP3(nn.Module):
         b, n, c, h, w = states.shape
         states = states.view(b * n, c, h, w)
         mean_states = self.mean_conv(states)
-        sigma_states = self.sigma_conv(states)
+        sigma_states = self.sigma_block(states)
         sample_states = mean_states + sigma_states.mul(0.5).exp_() * torch.randn_like(mean_states)
         sample_states = sample_states.view(b, n, *sample_states.shape[1:])
         return mean_states, sigma_states, sample_states
+
+    def get_sample_results(self, states):
+        sample = [np.zeros((200, 200)) for i in range(3)]
+        bev_output = self.decoder(states)
+        mean_states, sigma_states, sample_states = self.distribution_forward_2(states)
+        for i in range(self.cfg.MODEL.SAMPLE_NUM):
+            mean_states, sigma_states, sample_states = self.distribution_forward_2(states)
+            bev_output = self.decoder(sample_states)
+            segmentation = bev_output['segmentation'][:, self.receptive_field-1].detach() # the present timestamp
+            pedestrain = bev_output['pedestrian'][:, self.receptive_field-1].detach()
+            hdmap = bev_output['hdmap'].detach()
+            # drivable
+            drivable_area = torch.argmax(hdmap[0, 2:4], dim=0).cpu().numpy()
+            # lane
+            lane_area = torch.argmax(hdmap[0, 0:2], dim=0).cpu().numpy()
+            # car
+            semantic_seg_car = torch.argmax(segmentation[0], dim=0).cpu().numpy()
+            # pedestrain
+            semantic_seg_pedes = torch.argmax(pedestrain[0], dim=0).cpu().numpy()
+
+            drivable_area_index = drivable_area > 0
+            lane_area_index = lane_area > 0
+            semantic_seg_car_index = semantic_seg_car > 0
+            semantic_seg_pedes_index = semantic_seg_pedes > 0
+            sample[0][drivable_area_index] = sample[0][drivable_area_index]+1
+            # sample[1][lane_area_index] = sample[1][lane_area_index]+1
+            sample[1][semantic_seg_car_index] = sample[1][semantic_seg_car_index]+1
+            sample[2][semantic_seg_pedes_index] = sample[2][semantic_seg_pedes_index]+1
+
+        sample = [i/self.cfg.MODEL.SAMPLE_NUM for i in sample]
+        index = [np.logical_or(i  == 0, i  == 1) for i in sample]
+        entropy = np.zeros((200, 200))
+
+        for idx, sp in zip(index, sample):
+            entropy[~idx] = entropy[~idx] - (sp[~idx] * np.log2(sp[~idx]) + (1 - sp[~idx]) * np.log2(1 - sp[~idx]))
+
+        return bev_output, entropy, mean_states, sigma_states
 
 
     def distribution_forward(self, present_features, min_log_sigma, max_log_sigma):

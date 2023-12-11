@@ -47,10 +47,10 @@ _C.PRETRAINED.LOAD_WEIGHTS = False
 _C.PRETRAINED.PATH = ''
 
 _C.DATASET = CN()
-_C.DATASET.DATAROOT = 'data/nuscenes'
+_C.DATASET.DATAROOT = 'data/nuscene'
 _C.DATASET.VERSION = 'trainval'
-_C.DATASET.NAME = 'nuscenes'
-_C.DATASET.MAP_FOLDER = 'data/nuscenes'
+_C.DATASET.NAME = 'nuscene'
+_C.DATASET.MAP_FOLDER = 'data/nuscene'
 _C.DATASET.IGNORE_INDEX = 255  # Ignore index when creating flow/offset labels
 _C.DATASET.FILTER_INVISIBLE_VEHICLES = True  # Filter vehicles that are not visible from the cameras
 _C.DATASET.SAVE_DIR = 'datas'
@@ -105,7 +105,7 @@ _C.MODEL.FUTURE_PRED.N_RES_LAYERS = 1
 _C.MODEL.FUTURE_PRED.MIXTURE = True
 
 _C.MODEL.SAMPLE_RESULTS = False
-_C.MODEL.SAMPLE_NUM =  200
+_C.MODEL.SAMPLE_NUM =  100
 
 _C.MODEL.DECODER = CN()
 
@@ -164,7 +164,7 @@ _C.COST_FUNCTION.COMFORT = 0.1
 _C.COST_FUNCTION.PROGRESS = 0.5
 _C.COST_FUNCTION.VOLUME = 100.
 
-_C.COST_FUNCTION.KLLoss_WEIGHT = 1.
+_C.COST_FUNCTION.KLLoss_WEIGHT = 0.1
 
 def get_parser():
     parser = argparse.ArgumentParser(description='Fiery training')
