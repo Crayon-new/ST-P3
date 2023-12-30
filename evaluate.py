@@ -17,17 +17,24 @@ from stp3.metrics import IntersectionOverUnion, PanopticMetric, PlanningMetric
 from stp3.utils.network import preprocess_batch, NormalizeInverse
 from stp3.utils.instance import predict_instance_segmentation_and_trajectories
 from stp3.utils.visualisation import make_contour
+from stp3.config import get_cfg
+import matplotlib.cm as cm
+from scipy import ndimage
 
-def mk_save_dir():
+
+def mk_save_dir(debug_mode):
     now = datetime.datetime.now()
     string = '_'.join(map(lambda x: '%02d' % x, (now.month, now.day, now.hour, now.minute, now.second)))
-    save_path = pathlib.Path('imgs') / string
+    save_path = pathlib.Path('imgs')
+    if debug_mode:
+        save_path = save_path / 'debug_imgs'
+    save_path = save_path / string
     save_path.mkdir(parents=True, exist_ok=False)
     return save_path
 
-def eval(checkpoint_path, dataroot):
-    save_path = mk_save_dir()
 
+def eval(checkpoint_path, dataroot, debug_mode=False):
+    save_path = mk_save_dir(debug_mode)
     trainer = TrainingModule.load_from_checkpoint(checkpoint_path, strict=True)
     print(f'Loaded weights from \n {checkpoint_path}')
     trainer.eval()
@@ -37,16 +44,24 @@ def eval(checkpoint_path, dataroot):
     model = trainer.model
 
     cfg = model.cfg
-    cfg.GPUS = "[0]"
+    cfg.GPUS = "[0, 1, 2, 3]"
     cfg.BATCHSIZE = 1
     cfg.LIFT.GT_DEPTH = False
     cfg.DATASET.DATAROOT = dataroot
     cfg.DATASET.MAP_FOLDER = dataroot
 
+    cfg.DATASET.USE_CORRUPTION = False
+    cfg.DATASET.CORRUPTION_TYPE = 'Snow'
+    cfg.DATASET.CORRUPTION_LEVEL = 'hard'
+    cfg.DATASET.CORRUPTION_DATAROOT = 'data/nuScenes-c'
+
+    cfg.MODEL.TEST_SAMPLE_NUM = 1
+
     dataroot = cfg.DATASET.DATAROOT
     nworkers = cfg.N_WORKERS
-    nusc = NuScenes(version='v1.0-{}'.format(cfg.DATASET.VERSION), dataroot=dataroot, verbose=False)
-    valdata = FuturePredictionDataset(nusc, 1, cfg)
+    if "nuscene" in dataroot:
+        nusc = NuScenes(version='v1.0-{}'.format(cfg.DATASET.VERSION), dataroot=dataroot, verbose=False)
+        valdata = FuturePredictionDataset(nusc, 1, cfg)
     valloader = torch.utils.data.DataLoader(
         valdata, batch_size=cfg.BATCHSIZE, shuffle=False, num_workers=nworkers, pin_memory=True, drop_last=False
     )
@@ -70,8 +85,7 @@ def eval(checkpoint_path, dataroot):
     if cfg.PLANNING.ENABLED:
         metric_planning_val = []
         for i in range(future_second):
-            metric_planning_val.append(PlanningMetric(cfg, 2*(i+1)).to(device))
-
+            metric_planning_val.append(PlanningMetric(cfg, 2 * (i + 1)).to(device))
 
     for index, batch in enumerate(tqdm(valloader)):
         preprocess_batch(batch, device)
@@ -133,12 +147,14 @@ def eval(checkpoint_path, dataroot):
             occupancy = torch.logical_or(labels['segmentation'][:, n_present:].squeeze(2),
                                          labels['pedestrian'][:, n_present:].squeeze(2))
             for i in range(future_second):
-                cur_time = (i+1)*2
-                metric_planning_val[i](final_traj[:,:cur_time].detach(), labels['gt_trajectory'][:,1:cur_time+1], occupancy[:,:cur_time])
+                cur_time = (i + 1) * 2
+                metric_planning_val[i](final_traj[:, :cur_time].detach(), labels['gt_trajectory'][:, 1:cur_time + 1],
+                                       occupancy[:, :cur_time])
 
-        if index % 50 == 0:
+        if index % 100 == 0:
+            if cfg.PLANNING.ENABLED:
+                output = {**output, 'pred_trajectory': final_traj}
             save(output, labels, batch, n_present, index, save_path)
-
 
     results = {}
 
@@ -157,22 +173,27 @@ def eval(checkpoint_path, dataroot):
     if cfg.INSTANCE_SEG.ENABLED:
         scores = metric_panoptic_val.compute()
         for key, value in scores.items():
-            results['vehicle_'+key] = value[1]
+            results['vehicle_' + key] = value[1]
 
     if cfg.PLANNING.ENABLED:
         for i in range(future_second):
             scores = metric_planning_val[i].compute()
             for key, value in scores.items():
-                results['plan_'+key+'_{}s'.format(i+1)]=value.mean()
+                results['plan_' + key + '_{}s'.format(i + 1)] = value.mean()
 
     for key, value in results.items():
         print(f'{key} : {value.item()}')
+
 
 def save(output, labels, batch, n_present, frame, save_path):
     hdmap = output['hdmap'].detach()
     segmentation = output['segmentation'][:, n_present - 1].detach()
     pedestrian = output['pedestrian'][:, n_present - 1].detach()
-    gt_trajs = labels['gt_trajectory']
+    gt_trajs = labels['gt_trajectory'].cpu()
+    if 'pred_trajectory' in output:
+        gt_trajs = output['pred_trajectory'].detach().cpu()
+    # add self point
+    gt_trajs = torch.cat([torch.zeros((1, 1, 3)), gt_trajs], dim=1)
     images = batch['image']
 
     denormalise_img = torchvision.transforms.Compose(
@@ -182,29 +203,29 @@ def save(output, labels, batch, n_present, frame, save_path):
 
     val_w = 2.99
     val_h = 2.99 * (224. / 480.)
-    plt.figure(1, figsize=(3*val_w,4*val_h))
-    width_ratios = (val_w,val_w,val_w)
-    gs = matplotlib.gridspec.GridSpec(4, 3, width_ratios=width_ratios)
+    plt.figure(1, figsize=(3 * val_w, 6 * val_h))
+    width_ratios = (val_w, val_w, val_w)
+    gs = matplotlib.gridspec.GridSpec(6, 3, width_ratios=width_ratios)
     gs.update(wspace=0.0, hspace=0.0, left=0.0, right=1.0, top=1.0, bottom=0.0)
 
     plt.subplot(gs[0, 0])
     plt.annotate('FRONT LEFT', (0.01, 0.87), c='white', xycoords='axes fraction', fontsize=14)
-    plt.imshow(denormalise_img(images[0,n_present-1,0].cpu()))
+    plt.imshow(denormalise_img(images[0, n_present - 1, 0].cpu()))
     plt.axis('off')
 
     plt.subplot(gs[0, 1])
     plt.annotate('FRONT', (0.01, 0.87), c='white', xycoords='axes fraction', fontsize=14)
-    plt.imshow(denormalise_img(images[0,n_present-1,1].cpu()))
+    plt.imshow(denormalise_img(images[0, n_present - 1, 1].cpu()))
     plt.axis('off')
 
     plt.subplot(gs[0, 2])
     plt.annotate('FRONT RIGHT', (0.01, 0.87), c='white', xycoords='axes fraction', fontsize=14)
-    plt.imshow(denormalise_img(images[0,n_present-1,2].cpu()))
+    plt.imshow(denormalise_img(images[0, n_present - 1, 2].cpu()))
     plt.axis('off')
 
     plt.subplot(gs[1, 0])
     plt.annotate('BACK LEFT', (0.01, 0.87), c='white', xycoords='axes fraction', fontsize=14)
-    showing = denormalise_img(images[0,n_present-1,3].cpu())
+    showing = denormalise_img(images[0, n_present - 1, 3].cpu())
     showing = showing.transpose(Image.FLIP_LEFT_RIGHT)
     plt.imshow(showing)
     plt.axis('off')
@@ -223,7 +244,7 @@ def save(output, labels, batch, n_present, frame, save_path):
     plt.imshow(showing)
     plt.axis('off')
 
-    plt.subplot(gs[2:, 0])
+    plt.subplot(gs[2:4, 0])
     showing = torch.zeros((200, 200, 3)).numpy()
     showing[:, :] = np.array([219 / 255, 215 / 255, 215 / 255])
 
@@ -249,7 +270,7 @@ def save(output, labels, batch, n_present, frame, save_path):
     plt.imshow(make_contour(showing))
     plt.axis('off')
 
-    bx = np.array([-50.0 + 0.5/2.0, -50.0 + 0.5/2.0])
+    bx = np.array([-50.0 + 0.5 / 2.0, -50.0 + 0.5 / 2.0])
     dx = np.array([0.5, 0.5])
     w, h = 1.85, 4.084
     pts = np.array([
@@ -268,19 +289,94 @@ def save(output, labels, batch, n_present, frame, save_path):
     gt_trajs = (gt_trajs[0, :, :2].cpu().numpy() - bx) / dx
     plt.plot(gt_trajs[:, 0], gt_trajs[:, 1], linewidth=3.0)
 
+    if 'heat_map' in output:
+        # map to the pred results
+        plt.subplot(gs[4:6, 0])
+        showing = torch.zeros((200, 200, 3)).numpy()
+        showing[:, :] = np.array([219 / 255, 215 / 255, 215 / 255])
+
+        # drivable
+        area = torch.argmax(hdmap[0, 2:4], dim=0).cpu().numpy()
+        hdmap_index = area > 0
+        showing[hdmap_index] = np.array([161 / 255, 158 / 255, 158 / 255])
+
+        # lane
+        area = torch.argmax(hdmap[0, 0:2], dim=0).cpu().numpy()
+        hdmap_index = area > 0
+        showing[hdmap_index] = np.array([84 / 255, 70 / 255, 70 / 255])
+
+        # semantic
+        semantic_seg = torch.argmax(segmentation[0], dim=0).cpu().numpy()
+        semantic_index = semantic_seg > 0
+        showing[semantic_index] = np.array([255 / 255, 128 / 255, 0 / 255])
+
+        pedestrian_seg = torch.argmax(pedestrian[0], dim=0).cpu().numpy()
+        pedestrian_index = pedestrian_seg > 0
+        showing[pedestrian_index] = np.array([28 / 255, 81 / 255, 227 / 255])
+
+        cmap = cm.ScalarMappable(cmap='rainbow')
+        colormap_array = cmap.to_rgba(output['heat_map'])[:, :, :3]
+
+        showing[output['heat_map'] != 0] = colormap_array[output['heat_map'] != 0]
+        plt.imshow(make_contour(showing))
+        plt.axis('off')
+
+        plt.fill(pts[:, 0], pts[:, 1], '#76b900')
+        plt.xlim((200, 0))
+        plt.ylim((0, 200))
+
+        # sigma
+        plt.subplot(gs[4:6, 1])
+
+        sigma = output['sigma_states'].detach().cpu().numpy()
+        sigma = np.mean(sigma[n_present - 1], axis=0)
+        cmap = cm.ScalarMappable(cmap='rainbow')
+        colormap_array = cmap.to_rgba(sigma)[:, :, :3]
+        plt.imshow(make_contour(colormap_array))
+        plt.axis('off')
+
+        plt.fill(pts[:, 0], pts[:, 1], '#76b900')
+        plt.xlim((200, 0))
+        plt.ylim((0, 200))
+
+    if 'depth_prediction' in output:
+        plt.subplot(gs[4:6, 2])
+        depth = output['depth_prediction'].detach().cpu()
+        depth = depth[0][n_present-1][1]+1e-20
+        depth = depth.softmax(dim=0).numpy()
+        depth_entropy = -np.sum(depth*np.log2(depth), axis=0)
+        # depth_entropy = ndimage.zoom(depth_entropy, (224 / depth_entropy.shape[0], 480 / depth_entropy.shape[1]))
+        cmap = cm.ScalarMappable(cmap='rainbow')
+        plt.imshow(depth_entropy, cmap='hot')
+        plt.colorbar()
+        plt.axis('off')
+
+        plt.subplot(gs[4:6, 1])
+        depth = output['depth_prediction'].detach().cpu().numpy()
+        depth = depth[0][n_present - 1][1]
+        depth = np.argmax(depth, axis=0)
+        # depth = ndimage.zoom(depth, (224 / depth.shape[0], 480 / depth.shape[1]))
+        cmap = cm.ScalarMappable(cmap='rainbow')
+
+        plt.imshow(depth, cmap='rainbow')
+        plt.colorbar()
+        plt.axis('off')
+        # plt.xlim((200, 0))
+        # plt.ylim((0, 200))
+
     # groud truth representations
     hdmap = labels['hdmap'].detach()
 
-    plt.subplot(gs[2:, 1])
+    plt.subplot(gs[2:4, 1])
     showing = torch.zeros((200, 200, 3)).numpy()
     showing[:, :] = np.array([219 / 255, 215 / 255, 215 / 255])
 
-    # drivable
+    # lane
     area = hdmap[0, 0:2][1].cpu().numpy()
     hdmap_index = area > 0
     showing[hdmap_index] = np.array([161 / 255, 158 / 255, 158 / 255])
 
-    # lane
+    # drivable
     area = hdmap[0, 0:2][0].cpu().numpy()
     hdmap_index = area > 0
     showing[hdmap_index] = np.array([84 / 255, 70 / 255, 70 / 255])
@@ -306,14 +402,30 @@ def save(output, labels, batch, n_present, frame, save_path):
 
     plt.plot(gt_trajs[:, 0], gt_trajs[:, 1], linewidth=3.0)
 
+    if 'heat_map' in output:
+        plt.subplot(gs[2:4, 2])
+        showing = torch.zeros((200, 200, 3)).numpy()
+        showing[:, :, 0] = output['heat_map'] * 255
+
+        plt.imshow(output['heat_map'], cmap='rainbow')
+        plt.axis('off')
+
+        plt.fill(pts[:, 0], pts[:, 1], '#76b900')
+
+        plt.xlim((200, 0))
+        plt.ylim((0, 200))
+
     plt.savefig(save_path / ('%04d.png' % frame))
     plt.close()
+
 
 if __name__ == '__main__':
     parser = ArgumentParser(description='STP3 evaluation')
     parser.add_argument('--checkpoint', default='last.ckpt', type=str, help='path to checkpoint')
     parser.add_argument('--dataroot', default=None, type=str)
+    parser.add_argument('--debug_mode', default=False, type=bool)
+    # parser.add_argument('--config_file', default='/home2/huangzj/github_respo/ST-P3/stp3/config.py', type=str)
 
     args = parser.parse_args()
 
-    eval(args.checkpoint, args.dataroot)
+    eval(args.checkpoint, args.dataroot, args.debug_mode)

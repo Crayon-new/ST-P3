@@ -116,6 +116,10 @@ class TrainingModule(pl.LightningModule):
             image, intrinsics, extrinsics, future_egomotion,
         )
 
+        # for visualization
+        bev_output = output['aggregated_bev_output'][0]
+        output = {**output, **bev_output}
+
         #####
         # Loss computation
         #####
@@ -133,26 +137,23 @@ class TrainingModule(pl.LightningModule):
             # output['mean_states'] = output['mean_states'][mask]
 
             loss['KL_loss'] = (-0.5*output['sigma_states']+0.5*(output['sigma_states'].exp()+torch.square(output['mean_states']))).mean() * self.cfg.COST_FUNCTION.KLLoss_WEIGHT
-
+            # q = output['sigma_states'].sum()
+            # gamma = torch.log(torch.tensor(25., device='cuda'))
+            # for i in output['sigma_states'].shape:
+            #     gamma = gamma*i
+            # loss['uncertainty_loss'] = 0.1 * max(0, gamma - q)
             # segmentation
             segmentation_factor = 1 / (2 * torch.exp(self.model.segmentation_weight))
-            loss['segmentation'] = segmentation_factor * self.losses_fn['segmentation'](
-                output['segmentation'], labels['segmentation'], self.model.receptive_field
-            )
             loss['segmentation_uncertainty'] = 0.5 * self.model.segmentation_weight
 
             # Pedestrian
             if self.cfg.SEMANTIC_SEG.PEDESTRIAN.ENABLED:
                 pedestrian_factor = 1 / (2 * torch.exp(self.model.pedestrian_weight))
-                loss['pedestrian'] = pedestrian_factor * self.losses_fn['pedestrian'](
-                    output['pedestrian'], labels['pedestrian'], self.model.receptive_field
-                )
                 loss['pedestrian_uncertainty'] = 0.5 * self.model.pedestrian_weight
 
             # hdmap loss
             if self.cfg.SEMANTIC_SEG.HDMAP.ENABLED:
                 hdmap_factor = 1 / (2 * torch.exp(self.model.hdmap_weight))
-                loss['hdmap'] = hdmap_factor * self.losses_fn['hdmap'](output['hdmap'], labels['hdmap'])
                 loss['hdmap_uncertainty'] = 0.5 * self.model.hdmap_weight
 
             if self.cfg.INSTANCE_SEG.ENABLED:
@@ -206,6 +207,35 @@ class TrainingModule(pl.LightningModule):
                     [torch.zeros((B, 1, 3), device=final_traj.device), final_traj], dim=1)}
             else:
                 output = {**output, 'selected_traj': labels['gt_trajectory']}
+
+            for bev_output in output['aggregated_bev_output']:
+                if 'segmentation' not in loss:
+                    loss['segmentation'] = self.losses_fn['segmentation'](
+                        bev_output['segmentation'], labels['segmentation'], self.model.receptive_field
+                    )
+                else:
+                    loss['segmentation'] += self.losses_fn['segmentation'](
+                        bev_output['segmentation'], labels['segmentation'], self.model.receptive_field
+                    )
+                if self.cfg.SEMANTIC_SEG.PEDESTRIAN.ENABLED:
+                    if 'pedestrian' not in loss:
+                        loss['pedestrian'] = self.losses_fn['pedestrian'](
+                        bev_output['pedestrian'], labels['pedestrian'], self.model.receptive_field
+                    )
+                    else:
+                        loss['pedestrian'] += self.losses_fn['pedestrian'](
+                        bev_output['pedestrian'], labels['pedestrian'], self.model.receptive_field
+                    )
+                if self.cfg.SEMANTIC_SEG.HDMAP.ENABLED:
+                    if 'hdmap' not in loss:
+                        loss['hdmap'] = self.losses_fn['hdmap'](bev_output['hdmap'], labels['hdmap'])
+                    else:
+                        loss['hdmap'] += self.losses_fn['hdmap'](bev_output['hdmap'], labels['hdmap'])
+            loss['segmentation'] = loss['segmentation'] * segmentation_factor / len(output['aggregated_bev_output'])
+            if self.cfg.SEMANTIC_SEG.PEDESTRIAN.ENABLED:
+                loss['pedestrian'] = loss['pedestrian'] * pedestrian_factor / len(output['aggregated_bev_output'])
+            if self.cfg.SEMANTIC_SEG.HDMAP.ENABLED:
+                loss['hdmap'] = loss['hdmap'] * hdmap_factor / len(output['aggregated_bev_output'])
 
         # Metrics
         else:

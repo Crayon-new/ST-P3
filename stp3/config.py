@@ -33,7 +33,7 @@ _C = CN()
 _C.LOG_DIR = 'tensorboard_logs'
 _C.TAG = 'default'
 
-_C.GPUS = [0]  # which gpus to use
+_C.GPUS = [0, 1, 2, 3, 4, 5, 6, 7]  # which gpus to use
 _C.PRECISION = 32  # 16bit or 32bit
 _C.BATCHSIZE = 3
 _C.EPOCHS = 20
@@ -47,10 +47,15 @@ _C.PRETRAINED.LOAD_WEIGHTS = False
 _C.PRETRAINED.PATH = ''
 
 _C.DATASET = CN()
-_C.DATASET.DATAROOT = 'data/nuscene'
+_C.DATASET.DATAROOT = 'data/nuscenes'
+_C.DATASET.DEPTHROOT = 'data/nuScenes_depth'
+_C.DATASET.CORRUPTION_DATAROOT = 'data/nuScenes-c'
+_C.DATASET.USE_CORRUPTION = True
+_C.DATASET.CORRUPTION_TYPE = 'Snow'
+_C.DATASET.CORRUPTION_LEVEL = 'hard'
 _C.DATASET.VERSION = 'trainval'
-_C.DATASET.NAME = 'nuscene'
-_C.DATASET.MAP_FOLDER = 'data/nuscene'
+_C.DATASET.NAME = 'nuscenes'
+_C.DATASET.MAP_FOLDER = 'data/nuscenes'
 _C.DATASET.IGNORE_INDEX = 255  # Ignore index when creating flow/offset labels
 _C.DATASET.FILTER_INVISIBLE_VEHICLES = True  # Filter vehicles that are not visible from the cameras
 _C.DATASET.SAVE_DIR = 'datas'
@@ -105,7 +110,8 @@ _C.MODEL.FUTURE_PRED.N_RES_LAYERS = 1
 _C.MODEL.FUTURE_PRED.MIXTURE = True
 
 _C.MODEL.SAMPLE_RESULTS = False
-_C.MODEL.SAMPLE_NUM =  100
+_C.MODEL.TEST_SAMPLE_NUM =  1
+_C.MODEL.TRAIN_SAMPLE_NUM =  5
 
 _C.MODEL.DECODER = CN()
 
@@ -165,6 +171,7 @@ _C.COST_FUNCTION.PROGRESS = 0.5
 _C.COST_FUNCTION.VOLUME = 100.
 
 _C.COST_FUNCTION.KLLoss_WEIGHT = 0.1
+_C.COST_FUNCTION.UNCERTAINTY_WEIGHT = 0.5
 
 def get_parser():
     parser = argparse.ArgumentParser(description='Fiery training')

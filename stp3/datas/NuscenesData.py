@@ -40,6 +40,7 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
     def __init__(self, nusc, is_train, cfg):
         self.nusc = nusc
         self.dataroot = self.nusc.dataroot
+        self.depth_dataroot = cfg.DATASET.DEPTHROOT
         self.nusc_exp = NuScenesExplorer(nusc)
         self.nusc_can = NuScenesCanBus(dataroot=self.dataroot)
         self.is_train = is_train
@@ -235,6 +236,9 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
 
             # Load image
             image_filename = os.path.join(self.dataroot, camera_sample['filename'])
+            if self.cfg.DATASET.USE_CORRUPTION:
+                image_filename = os.path.join(self.cfg.DATASET.CORRUPTION_DATAROOT,self.cfg.DATASET.CORRUPTION_TYPE,
+                                              self.cfg.DATASET.CORRUPTION_LEVEL, camera_sample['filename'][8:])
             img = Image.open(image_filename)
             # Resize and crop
             img = resize_and_crop_image(
@@ -255,12 +259,10 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
             # Get Depth
             # Depth data should under the dataroot path 
             if self.cfg.LIFT.GT_DEPTH:
-                base_root = os.path.join(self.dataroot, 'depths') 
-                filename = os.path.basename(camera_sample['filename']).split('.')[0] + '.npy'
-                depth_file_name = os.path.join(base_root, cam, 'npy', filename)
-                depth = torch.from_numpy(np.load(depth_file_name)).unsqueeze(0).unsqueeze(0)
-                depth = F.interpolate(depth, scale_factor=self.cfg.IMAGE.RESIZE_SCALE, mode='bilinear')
-                depth = depth.squeeze()
+                image_path = camera_sample['filename'][:-4]+".npy"
+                depth_file_name = os.path.join(self.depth_dataroot, image_path)
+                depth = torch.from_numpy(np.load(depth_file_name)).squeeze()
+                # depth = F.interpolate(depth, scale_factor=self.cfg.IMAGE.RESIZE_SCALE, mode='bilinear')
                 crop = self.augmentation_parameters['crop']
                 depth = depth[crop[1]:crop[3], crop[0]:crop[2]]
                 depth = torch.round(depth)
