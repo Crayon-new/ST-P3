@@ -109,6 +109,11 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
             if scene_no in scenes:
                 scenes.remove(scene_no)
 
+        if self.cfg.DATASET.USE_PARTIAL and self.is_train==0:
+            import random
+            random.seed(10)
+            random.shuffle(scenes)
+            scenes = scenes[:int(len(scenes)*self.cfg.DATASET.PARTIAL_RATIO)]
         return scenes
 
     def prepro(self):
@@ -145,7 +150,6 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
 
             if is_valid_data:
                 indices.append(current_indices)
-
         return np.asarray(indices)
 
     def get_resizing_and_cropping_parameters(self):

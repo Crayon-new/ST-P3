@@ -39,7 +39,6 @@ class SpatialRegressionLoss(nn.Module):
 
         return loss[mask].mean()
 
-
 class SegmentationLoss(nn.Module):
     def __init__(self, class_weights, ignore_index=255, use_top_k=False, top_k_ratio=1.0, future_discount=1.0):
         super().__init__()

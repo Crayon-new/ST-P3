@@ -49,13 +49,14 @@ def eval(checkpoint_path, dataroot, debug_mode=False):
     cfg.LIFT.GT_DEPTH = False
     cfg.DATASET.DATAROOT = dataroot
     cfg.DATASET.MAP_FOLDER = dataroot
+    cfg.MODEL.SAMPLE_RESULTS = True
 
     cfg.DATASET.USE_CORRUPTION = False
     cfg.DATASET.CORRUPTION_TYPE = 'Snow'
     cfg.DATASET.CORRUPTION_LEVEL = 'hard'
     cfg.DATASET.CORRUPTION_DATAROOT = 'data/nuScenes-c'
 
-    cfg.MODEL.TEST_SAMPLE_NUM = 1
+    cfg.MODEL.TEST_SAMPLE_NUM = 100
 
     dataroot = cfg.DATASET.DATAROOT
     nworkers = cfg.N_WORKERS
@@ -151,7 +152,7 @@ def eval(checkpoint_path, dataroot, debug_mode=False):
                 metric_planning_val[i](final_traj[:, :cur_time].detach(), labels['gt_trajectory'][:, 1:cur_time + 1],
                                        occupancy[:, :cur_time])
 
-        if index % 100 == 0:
+        if index % 1 == 0:
             if cfg.PLANNING.ENABLED:
                 output = {**output, 'pred_trajectory': final_traj}
             save(output, labels, batch, n_present, index, save_path)
@@ -330,10 +331,11 @@ def save(output, labels, batch, n_present, frame, save_path):
 
         sigma = output['sigma_states'].detach().cpu().numpy()
         sigma = np.mean(sigma[n_present - 1], axis=0)
-        cmap = cm.ScalarMappable(cmap='rainbow')
-        colormap_array = cmap.to_rgba(sigma)[:, :, :3]
+        cmap = cm.ScalarMappable(cmap='gray')
+        colormap_array = cmap.to_rgba(sigma)[:,:,:3]
         plt.imshow(make_contour(colormap_array))
         plt.axis('off')
+
 
         plt.fill(pts[:, 0], pts[:, 1], '#76b900')
         plt.xlim((200, 0))

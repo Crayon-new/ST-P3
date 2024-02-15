@@ -41,6 +41,13 @@ class Decoder(nn.Module):
             nn.Conv2d(shared_out_channels, self.n_classes, kernel_size=1, padding=0),
         )
 
+        self.segmentation_sigma = nn.Sequential(
+            nn.Conv2d(shared_out_channels, shared_out_channels, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(shared_out_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(shared_out_channels, 1, kernel_size=1, padding=0),
+        )
+
         if self.predict_pedestrian:
             self.pedestrian_head = nn.Sequential(
                 nn.Conv2d(shared_out_channels, shared_out_channels, kernel_size=3, padding=1, bias=False),
@@ -118,6 +125,7 @@ class Decoder(nn.Module):
         x = self.up1_skip(x, skip_x['1'])
 
         segmentation_output = self.segmentation_head(x)
+        segmentation_sigma = torch.clamp(self.segmentation_sigma(x), -7, 7)
         pedestrian_output = self.pedestrian_head(x) if self.predict_pedestrian else None
         hdmap_output = self.hdmap_head(x.view(b, s, *x.shape[1:])[:,self.n_present-1]) if self.perceive_hdmap else None
         instance_center_output = self.instance_center_head(x) if self.predict_instance else None
@@ -125,7 +133,8 @@ class Decoder(nn.Module):
         instance_future_output = self.instance_future_head(x) if self.predict_future_flow else None
         costvolume = self.costvolume_head(x).squeeze(1) if self.planning else None
         return {
-            'segmentation': segmentation_output.view(b, s, *segmentation_output.shape[1:]),
+            'mean_states': segmentation_output.view(b, s, *segmentation_output.shape[1:]),
+            'sigma_states': segmentation_sigma.view(b, s, *segmentation_sigma.shape[1:]),
             'pedestrian': pedestrian_output.view(b, s, *pedestrian_output.shape[1:])
             if pedestrian_output is not None else None,
             'hdmap' : hdmap_output,

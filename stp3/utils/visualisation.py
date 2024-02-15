@@ -2,8 +2,8 @@ import numpy as np
 import torch
 import matplotlib.pylab
 import matplotlib.pyplot as plt
+from matplotlib import cm
 from stp3.utils.tools import gen_dx_bx
-
 
 from stp3.utils.instance import predict_instance_segmentation_and_trajectories
 
@@ -41,7 +41,7 @@ def _normalise(image: np.ndarray) -> np.ndarray:
 
 
 def apply_colour_map(
-    image: np.ndarray, cmap: matplotlib.colors.LinearSegmentedColormap = DEFAULT_COLORMAP, autoscale: bool = False
+        image: np.ndarray, cmap: matplotlib.colors.LinearSegmentedColormap = DEFAULT_COLORMAP, autoscale: bool = False
 ) -> np.ndarray:
     """
     Applies a colour map to the given 1 or 2 channel numpy image. if 2 channel, must be 2xHxW.
@@ -66,7 +66,7 @@ def apply_colour_map(
 
 
 def heatmap_image(
-    image: np.ndarray, cmap: matplotlib.colors.LinearSegmentedColormap = DEFAULT_COLORMAP, autoscale: bool = True
+        image: np.ndarray, cmap: matplotlib.colors.LinearSegmentedColormap = DEFAULT_COLORMAP, autoscale: bool = True
 ) -> np.ndarray:
     """Colorize an 1 or 2 channel image with a colourmap."""
     if not issubclass(image.dtype.type, np.floating):
@@ -136,30 +136,30 @@ def make_color_wheel() -> np.ndarray:
     col += red_yellow
 
     # yellow_green
-    colorwheel[col : col + yellow_green, 0] = 255 - np.transpose(
+    colorwheel[col: col + yellow_green, 0] = 255 - np.transpose(
         np.floor(255 * np.arange(0, yellow_green) / yellow_green)
     )
-    colorwheel[col : col + yellow_green, 1] = 255
+    colorwheel[col: col + yellow_green, 1] = 255
     col += yellow_green
 
     # green_cyan
-    colorwheel[col : col + green_cyan, 1] = 255
-    colorwheel[col : col + green_cyan, 2] = np.transpose(np.floor(255 * np.arange(0, green_cyan) / green_cyan))
+    colorwheel[col: col + green_cyan, 1] = 255
+    colorwheel[col: col + green_cyan, 2] = np.transpose(np.floor(255 * np.arange(0, green_cyan) / green_cyan))
     col += green_cyan
 
     # cyan_blue
-    colorwheel[col : col + cyan_blue, 1] = 255 - np.transpose(np.floor(255 * np.arange(0, cyan_blue) / cyan_blue))
-    colorwheel[col : col + cyan_blue, 2] = 255
+    colorwheel[col: col + cyan_blue, 1] = 255 - np.transpose(np.floor(255 * np.arange(0, cyan_blue) / cyan_blue))
+    colorwheel[col: col + cyan_blue, 2] = 255
     col += cyan_blue
 
     # blue_magenta
-    colorwheel[col : col + blue_magenta, 2] = 255
-    colorwheel[col : col + blue_magenta, 0] = np.transpose(np.floor(255 * np.arange(0, blue_magenta) / blue_magenta))
+    colorwheel[col: col + blue_magenta, 2] = 255
+    colorwheel[col: col + blue_magenta, 0] = np.transpose(np.floor(255 * np.arange(0, blue_magenta) / blue_magenta))
     col += +blue_magenta
 
     # magenta_red
-    colorwheel[col : col + magenta_red, 2] = 255 - np.transpose(np.floor(255 * np.arange(0, magenta_red) / magenta_red))
-    colorwheel[col : col + magenta_red, 0] = 255
+    colorwheel[col: col + magenta_red, 2] = 255 - np.transpose(np.floor(255 * np.arange(0, magenta_red) / magenta_red))
+    colorwheel[col: col + magenta_red, 0] = 255
 
     return colorwheel
 
@@ -256,6 +256,8 @@ def visualise_output(labels, output, cfg):
         else:
             future_flow_plot = np.zeros_like(semantic_plot)
 
+        # sigma_plot = np.zeros_like(semantic_plot)
+
         planning_plot = plot_planning(labels['hdmap'][b], labels['gt_trajectory'][b], cfg)
         planning_plot = make_contour(planning_plot)
 
@@ -328,6 +330,7 @@ def convert_figure_numpy(figure):
     figure_np = figure_np.reshape(figure.canvas.get_width_height()[::-1] + (3,))
     return figure_np
 
+
 def plot_planning(hd_map, traj, cfg):
     '''
     hd_map: torch.tensor (2, 200, 200)
@@ -339,7 +342,7 @@ def plot_planning(hd_map, traj, cfg):
         traj = traj.detach().cpu().numpy()
 
     h, w = hd_map.shape[-2:]
-    fig = plt.figure(figsize=(w/100, h/100))
+    fig = plt.figure(figsize=(w / 100, h / 100))
 
     dx, bx, _ = gen_dx_bx(cfg.LIFT.X_BOUND, cfg.LIFT.Y_BOUND, cfg.LIFT.Z_BOUND)
     dx, bx = dx[:2].numpy(), bx[:2].numpy()
@@ -375,8 +378,8 @@ def plot_planning(hd_map, traj, cfg):
     figure_numpy = convert_figure_numpy(fig)
     plt.close()
 
-
     return figure_numpy
+
 
 def generate_instance_colours(instance_map):
     # Most distinct 22 colors (kelly colors from https://stackoverflow.com/questions/470690/how-to-automatically-generate

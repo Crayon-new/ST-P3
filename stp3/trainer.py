@@ -116,44 +116,68 @@ class TrainingModule(pl.LightningModule):
             image, intrinsics, extrinsics, future_egomotion,
         )
 
-        # for visualization
-        bev_output = output['aggregated_bev_output'][0]
-        output = {**output, **bev_output}
-
+        if "segmentation_list" in output:
+            output['segmentation'] = output['segmentation_list'][0]
         #####
         # Loss computation
         #####
         loss = {}
         if is_train:
-            # kl_loss
-            # Only consider the drivable area
-            # mask = labels['hdmap'][:, 0] == 1
-            # mask = mask.unsqueeze(1).repeat(1, 3, 1, 1)
-            # output['sigma_states'] = output['sigma_states'].view(B, self.model.receptive_field, *output['sigma_states'].shape[1:])
-            # output['sigma_states'] = output['sigma_states'].permute(0, 1, 3, 4, 2)
-            # output['sigma_states'] = output['sigma_states'][mask]
-            # output['mean_states'] = output['mean_states'].view(B, self.model.receptive_field, *output['mean_states'].shape[1:])
-            # output['mean_states'] = output['mean_states'].permute(0, 1, 3, 4, 2)
-            # output['mean_states'] = output['mean_states'][mask]
+            # # KL loss
+            seg_pred = output['segmentation']
+            seg_pred = seg_pred[:,:self.model.receptive_field]
 
-            loss['KL_loss'] = (-0.5*output['sigma_states']+0.5*(output['sigma_states'].exp()+torch.square(output['mean_states']))).mean() * self.cfg.COST_FUNCTION.KLLoss_WEIGHT
-            # q = output['sigma_states'].sum()
-            # gamma = torch.log(torch.tensor(25., device='cuda'))
-            # for i in output['sigma_states'].shape:
-            #     gamma = gamma*i
-            # loss['uncertainty_loss'] = 0.1 * max(0, gamma - q)
+            softmax_2 = nn.Softmax(dim=2)
+            seg_pred = softmax_2(seg_pred)
+            seg_pred = seg_pred[:,:,1:2,:,:]
+
+            seg_pred =  torch.where(labels['segmentation'][:,:self.model.receptive_field] == 1, seg_pred, 1 - seg_pred)
+            seg_pred = seg_pred.view((seg_pred.shape[0]*seg_pred.shape[1], *seg_pred.shape[2:]))
+
+            gt_sigma = torch.ones(*output['sigma_states'].shape,
+                                  device=output['sigma_states'].device) * self.cfg.COST_FUNCTION.KLLoss_SIGMA_RANGE
+            gt_mu = torch.zeros(*output['mean_states'].shape, device=output['mean_states'].device)
+
+            loss['KL_loss'] = (torch.log(gt_sigma) - 0.5 * output['sigma_states'] - 0.5 + (
+                                      output['sigma_states'].exp() + (output['mean_states'] - gt_mu) ** 2) /
+                                      (2 * (gt_sigma ** 2)))
+
+            b, s, c, h, w = loss['KL_loss'].shape
+            loss['KL_loss'] = loss['KL_loss'].view(b*s, c, h, w)
+
+            loss['KL_loss'] = (torch.pow((1-seg_pred), self.cfg.COST_FUNCTION.KLLoss_GAMMA)*loss['KL_loss']).mean() * self.cfg.COST_FUNCTION.KLLoss_WEIGHT
+
             # segmentation
             segmentation_factor = 1 / (2 * torch.exp(self.model.segmentation_weight))
+
+            if "segmentation_list" in output:
+                loss['segmentation'] = self.losses_fn['segmentation'](
+                    output['segmentation_list'][0], labels['segmentation'], self.model.receptive_field
+                )
+                for i in range(1, len(output['segmentation_list'])):
+                    loss['segmentation'] += self.losses_fn['segmentation'](
+                        output['segmentation_list'][i], labels['segmentation'], self.model.receptive_field
+                    )
+                loss['segmentation'] = segmentation_factor * loss['segmentation'] / len(output['segmentation_list'])
+            else:
+                loss['segmentation'] = segmentation_factor * self.losses_fn['segmentation'](
+                    output['segmentation'], labels['segmentation'], self.model.receptive_field
+                )
+
             loss['segmentation_uncertainty'] = 0.5 * self.model.segmentation_weight
 
             # Pedestrian
             if self.cfg.SEMANTIC_SEG.PEDESTRIAN.ENABLED:
                 pedestrian_factor = 1 / (2 * torch.exp(self.model.pedestrian_weight))
+                loss['pedestrian'] = pedestrian_factor * self.losses_fn['pedestrian'](
+                    output['pedestrian'], labels['pedestrian'], self.model.receptive_field
+                )
                 loss['pedestrian_uncertainty'] = 0.5 * self.model.pedestrian_weight
 
             # hdmap loss
             if self.cfg.SEMANTIC_SEG.HDMAP.ENABLED:
                 hdmap_factor = 1 / (2 * torch.exp(self.model.hdmap_weight))
+                loss['hdmap'] = hdmap_factor * self.losses_fn['hdmap'](output['hdmap'], labels['hdmap'])
                 loss['hdmap_uncertainty'] = 0.5 * self.model.hdmap_weight
 
             if self.cfg.INSTANCE_SEG.ENABLED:
@@ -207,35 +231,6 @@ class TrainingModule(pl.LightningModule):
                     [torch.zeros((B, 1, 3), device=final_traj.device), final_traj], dim=1)}
             else:
                 output = {**output, 'selected_traj': labels['gt_trajectory']}
-
-            for bev_output in output['aggregated_bev_output']:
-                if 'segmentation' not in loss:
-                    loss['segmentation'] = self.losses_fn['segmentation'](
-                        bev_output['segmentation'], labels['segmentation'], self.model.receptive_field
-                    )
-                else:
-                    loss['segmentation'] += self.losses_fn['segmentation'](
-                        bev_output['segmentation'], labels['segmentation'], self.model.receptive_field
-                    )
-                if self.cfg.SEMANTIC_SEG.PEDESTRIAN.ENABLED:
-                    if 'pedestrian' not in loss:
-                        loss['pedestrian'] = self.losses_fn['pedestrian'](
-                        bev_output['pedestrian'], labels['pedestrian'], self.model.receptive_field
-                    )
-                    else:
-                        loss['pedestrian'] += self.losses_fn['pedestrian'](
-                        bev_output['pedestrian'], labels['pedestrian'], self.model.receptive_field
-                    )
-                if self.cfg.SEMANTIC_SEG.HDMAP.ENABLED:
-                    if 'hdmap' not in loss:
-                        loss['hdmap'] = self.losses_fn['hdmap'](bev_output['hdmap'], labels['hdmap'])
-                    else:
-                        loss['hdmap'] += self.losses_fn['hdmap'](bev_output['hdmap'], labels['hdmap'])
-            loss['segmentation'] = loss['segmentation'] * segmentation_factor / len(output['aggregated_bev_output'])
-            if self.cfg.SEMANTIC_SEG.PEDESTRIAN.ENABLED:
-                loss['pedestrian'] = loss['pedestrian'] * pedestrian_factor / len(output['aggregated_bev_output'])
-            if self.cfg.SEMANTIC_SEG.HDMAP.ENABLED:
-                loss['hdmap'] = loss['hdmap'] * hdmap_factor / len(output['aggregated_bev_output'])
 
         # Metrics
         else:
@@ -441,6 +436,7 @@ class TrainingModule(pl.LightningModule):
                 scores = self.metric_pedestrian_val.compute()
                 self.logger.experiment.add_scalar('epoch_val_all_seg_iou_pedestrian', scores[1],
                                                   global_step=self.training_step_count)
+
                 self.metric_pedestrian_val.reset()
 
             if self.cfg.SEMANTIC_SEG.HDMAP.ENABLED:
@@ -448,6 +444,7 @@ class TrainingModule(pl.LightningModule):
                     scores = self.metric_hdmap_val[i].compute()
                     self.logger.experiment.add_scalar('epoch_val_hdmap_iou_' + name, scores[1],
                                                       global_step=self.training_step_count)
+
                     self.metric_hdmap_val[i].reset()
 
             if self.cfg.INSTANCE_SEG.ENABLED:
@@ -455,6 +452,7 @@ class TrainingModule(pl.LightningModule):
                 for key, value in scores.items():
                     self.logger.experiment.add_scalar(f'epoch_val_all_ins_{key}_vehicle', value[1].item(),
                                                       global_step=self.training_step_count)
+
                 self.metric_panoptic_val.reset()
 
             if self.cfg.PLANNING.ENABLED:
@@ -462,21 +460,25 @@ class TrainingModule(pl.LightningModule):
                 for key, value in scores.items():
                     self.logger.experiment.add_scalar('epoch_val_plan_' + key, value.mean(),
                                                       global_step=self.training_step_count)
+
                 self.metric_planning_val.reset()
 
-        self.logger.experiment.add_scalar('epoch_segmentation_weight',
-                                          1 / (2 * torch.exp(self.model.segmentation_weight)),
-                                          global_step=self.training_step_count)
+        # self.logger.experiment.add_scalar('epoch_segmentation_weight',
+        #                                   1 / (2 * torch.exp(self.model.segmentation_weight)),
+        #                                   global_step=self.training_step_count)
         if self.cfg.LIFT.GT_DEPTH:
             self.logger.experiment.add_scalar('epoch_depths_weight', 1 / (2 * torch.exp(self.model.depths_weight)),
                                               global_step=self.training_step_count)
+
         if self.cfg.SEMANTIC_SEG.PEDESTRIAN.ENABLED:
             self.logger.experiment.add_scalar('epoch_pedestrian_weight',
                                               1 / (2 * torch.exp(self.model.pedestrian_weight)),
                                               global_step=self.training_step_count)
+
         if self.cfg.SEMANTIC_SEG.HDMAP.ENABLED:
             self.logger.experiment.add_scalar('epoch_hdmap_weight', 1 / (2 * torch.exp(self.model.hdmap_weight)),
                                               global_step=self.training_step_count)
+
         if self.cfg.INSTANCE_SEG.ENABLED:
             self.logger.experiment.add_scalar('epoch_centerness_weight',
                                               1 / (2 * torch.exp(self.model.centerness_weight)),

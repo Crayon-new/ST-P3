@@ -10,6 +10,7 @@ from stp3.models.distributions import DistributionModule
 from stp3.models.future_prediction import FuturePrediction
 from stp3.models.variance_net import VarianceNet
 from stp3.models.decoder import Decoder
+# from stp3.models.feature_pyramid import Fpn
 from stp3.models.planning_model import Planning
 from stp3.utils.network import pack_sequence_dim, unpack_sequence_dim, set_bn_momentum
 from stp3.utils.geometry import calculate_birds_eye_view_parameters, VoxelsSumming, pose_vec2mat
@@ -49,8 +50,16 @@ class STP3(nn.Module):
         # Encoder
         self.encoder = Encoder(cfg=self.cfg.MODEL.ENCODER, D=self.depth_channels)
 
-        self.mean_conv = nn.Conv2d(self.encoder_out_channels, self.encoder_out_channels , 1)
-        self.sigma_block = VarianceNet(self.encoder_out_channels, 2*self.encoder_out_channels,  self.encoder_out_channels)
+        # self.mean_conv = nn.Sequential(
+        #     nn.Conv2d(self.encoder_out_channels, self.encoder_out_channels, 1),
+        #     nn.BatchNorm2d(self.encoder_out_channels)
+        # )
+        # # self.sigma_block = VarianceNet(self.encoder_out_channels, 2*self.encoder_out_channels,  self.encoder_out_channels)
+        # # self.sigma_block = nn.Conv2d(self.encoder_out_channels, 1, 1),
+        # self.sigma_block = nn.Sequential(nn.Conv2d(2, 2, 1),
+        #                                  nn.ReLU(inplace=True),
+        #                                  nn.Conv2d(self.encoder_out_channels//2, 1, 1)
+        #                                  )
 
         # Temporal model
         temporal_in_channels = self.encoder_out_channels
@@ -71,7 +80,8 @@ class STP3(nn.Module):
         else:
             raise NotImplementedError(f'Temporal module {self.cfg.MODEL.TEMPORAL_MODEL.NAME}.')
 
-        self.future_pred_in_channels = self.temporal_model.out_channels
+        # self.future_pred_in_channels = self.temporal_model.out_channels
+        self.future_pred_in_channels = 2
         if self.n_future > 0:
             # probabilistic sampling
             if self.cfg.PROBABILISTIC.ENABLED:
@@ -94,11 +104,11 @@ class STP3(nn.Module):
 
         # Decoder
         self.decoder = Decoder(
-            in_channels=self.future_pred_in_channels,
+            in_channels=self.temporal_model.out_channels,
             n_classes=len(self.cfg.SEMANTIC_SEG.VEHICLE.WEIGHTS),
             n_present=self.receptive_field,
             n_hdmap=len(self.cfg.SEMANTIC_SEG.HDMAP.ELEMENTS),
-            predict_gate = {
+            predict_gate={
                 'perceive_hdmap': self.cfg.SEMANTIC_SEG.HDMAP.ENABLED,
                 'predict_pedestrian': self.cfg.SEMANTIC_SEG.PEDESTRIAN.ENABLED,
                 'predict_instance': self.cfg.INSTANCE_SEG.ENABLED,
@@ -106,6 +116,9 @@ class STP3(nn.Module):
                 'planning': self.cfg.PLANNING.ENABLED,
             }
         )
+
+        # # FPN
+        # self.fpn = Fpn(self.encoder_out_channels)
 
         # Cost function
         # Carla 128, Nuscenes 256
@@ -131,7 +144,7 @@ class STP3(nn.Module):
         y_grid = y_grid.view(1, downsampled_h, 1).expand(n_depth_slices, downsampled_h, downsampled_w)
 
         # Dimension (n_depth_slices, downsampled_h, downsampled_w, 3)
-        # containing data points in the image: left-right, top-bottom, depth
+        #  containing data points in the image: left-right, top-bottom, depth
         frustum = torch.stack((x_grid, y_grid, depth_grid), -1)
         return nn.Parameter(frustum, requires_grad=False)
 
@@ -139,14 +152,15 @@ class STP3(nn.Module):
         output = {}
 
         # Only process features from the past and present
-        image = image[:, :self.receptive_field].contiguous() # (B2, F3, V6, C3, H224, W480) for nus
-        intrinsics = intrinsics[:, :self.receptive_field].contiguous() # (B2, F3, V6, 3, 3) for nus
-        extrinsics = extrinsics[:, :self.receptive_field].contiguous() # (B2, F3, V6, 4, 4) for nus
-        future_egomotion = future_egomotion[:, :self.receptive_field].contiguous() #(2, 3, 6)
+        image = image[:, :self.receptive_field].contiguous()  # (B2, F3, V6, C3, H224, W480) for nus
+        intrinsics = intrinsics[:, :self.receptive_field].contiguous()  # (B2, F3, V6, 3, 3) for nus
+        extrinsics = extrinsics[:, :self.receptive_field].contiguous()  # (B2, F3, V6, 4, 4) for nus
+        future_egomotion = future_egomotion[:, :self.receptive_field].contiguous()  # (2, 3, 6)
 
         # Lifting features and project to bird's-eye view
-        x, depth, cam_front = self.calculate_birds_eye_view_features(image, intrinsics, extrinsics, future_egomotion) # (3,3,64,200,200)
-        output = {**output, 'depth_prediction': depth, 'cam_front':cam_front}
+        x, depth, cam_front = self.calculate_birds_eye_view_features(image, intrinsics, extrinsics,
+                                                                     future_egomotion)  # (3,3,64,200,200)
+        output = {**output, 'depth_prediction': depth, 'cam_front': cam_front}
 
         if self.cfg.MODEL.TEMPORAL_MODEL.INPUT_EGOPOSE:
             b, s, c = future_egomotion.shape
@@ -154,15 +168,17 @@ class STP3(nn.Module):
             future_egomotions_spatial = future_egomotion.view(b, s, c, 1, 1).expand(b, s, c, h, w)
             # at time 0, no egomotion so feed zero vector
             future_egomotions_spatial = torch.cat([torch.zeros_like(future_egomotions_spatial[:, :1]),
-                                                   future_egomotions_spatial[:, :(self.receptive_field-1)]], dim=1)
+                                                   future_egomotions_spatial[:, :(self.receptive_field - 1)]], dim=1)
             x = torch.cat([x, future_egomotions_spatial], dim=-3)
 
         #  Temporal model
-        states = self.temporal_model(x) # include 3 past feature
+        states = self.temporal_model(x)  # include 3 past feature
 
         if self.n_future > 0:
+            bev_output = self.decoder(states)
+            states = self.sample_with_uncertainty(bev_output['mean_states'], bev_output['sigma_states'])
             present_state = states[:, -1:].contiguous()
-
+            # states = self.fpn(states)
             b, _, c, h, w = present_state.shape
 
             if self.cfg.PROBABILISTIC.ENABLED:
@@ -176,33 +192,39 @@ class STP3(nn.Module):
                 future_prediction_input = present_state.new_zeros(b, 1, self.latent_dim, h, w)
 
             # predict the future
-            states = self.future_prediction(future_prediction_input, states) #(2, 9, 64, 200, 200)
+            states = self.future_prediction(future_prediction_input, states)  # (2, 9, 64, 200, 200)
 
             # predict BEV outputs
-            bev_output = self.decoder(states)
+            bev_output['segmentation'] = states
             output = {**output, **bev_output}
 
         else:
             b, n, c, h, w = states.shape
-            states = states.view(b * n, c, h, w)
-            mean_states = self.mean_conv(states)
-            sigma_states = torch.clamp(self.sigma_block(states), -7, 7)
+            # states = self.fpn(states)
             # Perceive BEV outputs
-            if self.cfg.MODEL.SAMPLE_RESULTS or True:
+            if self.cfg.MODEL.SAMPLE_RESULTS:
+                bev_output = self.decoder(states)
+                heat_map = self.get_sample_results(bev_output)
+                output = {**output, **bev_output, "heat_map": heat_map}
+
                 # start = time.time()
-                bev_output, heat_map= self.get_sample_results(mean_states, sigma_states, b, n)
+                # bev_output, heat_map= self.get_sample_results(mean_states, sigma_states, b, n)
                 # end = time.time()
                 # execution_time = end - start
                 # print(f"执行时间: {execution_time} 秒")
-                output = {**output, **bev_output, "mean_states": mean_states, "sigma_states": sigma_states, "heat_map": heat_map}
+                # output = {**output, **bev_output, "mean_states": bev_output['segmentation_mean'], "sigma_states": bev_output['segmentation_sigma'], "heat_map": heat_map}
             else:
-                bev_output = []
-                for _ in range(self.cfg.MODEL.TRAIN_SAMPLE_NUM):
-                    states = self.sample_with_uncertainty(mean_states, sigma_states, b, n)
-                    bev_output.append(self.decoder(states))
-                output = {**output, "aggregated_bev_output": bev_output, "mean_states": mean_states, "sigma_states": sigma_states}
+                bev_output = self.decoder(states)
+                bev_output['segmentation_list'] = []
+                for i in range(self.cfg.MODEL.TRAIN_SAMPLE_NUM):
+                    bev_output['segmentation_list'].append(
+                        self.sample_with_uncertainty(bev_output['mean_states'], bev_output['sigma_states']))
+                output = {**output, **bev_output}
 
         return output
+
+    def save(self, path, array):
+        np.save(path, array.cpu().numpy())
 
     def get_geometry(self, intrinsics, extrinsics):
         """Calculate the (x, y, z) 3D position of the features.
@@ -225,8 +247,8 @@ class STP3(nn.Module):
         # batch, n_cameras, channels, height, width
         b, n, c, h, w = x.shape
 
-        x = x.view(b * n, c, h, w) # (9 * 6, 3, 224, 480)
-        x, depth = self.encoder(x) # (9 * 6, 64, 28, 60)
+        x = x.view(b * n, c, h, w)  # (9 * 6, 3, 224, 480)
+        x, depth = self.encoder(x)  # (9 * 6, 64, 28, 60)
         if self.cfg.PLANNING.ENABLED:
             cam_front = x.view(b, n, *x.shape[1:])[:, cam_front_index]
         else:
@@ -239,7 +261,7 @@ class STP3(nn.Module):
             x = x.unsqueeze(2).repeat(1, 1, self.depth_channels, 1, 1)
 
         x = x.view(b, n, *x.shape[1:])
-        x = x.permute(0, 1, 3, 4, 5, 2) # channel dimension
+        x = x.permute(0, 1, 3, 4, 5, 2)  # channel dimension
         depth = depth.view(b, n, *depth.shape[1:])
 
         return x, depth, cam_front
@@ -333,56 +355,64 @@ class STP3(nn.Module):
         x = unpack_sequence_dim(x, b, s)
         geometry = unpack_sequence_dim(geometry, b, s)
         depth = unpack_sequence_dim(depth, b, s)
-        cam_front = unpack_sequence_dim(cam_front, b, s)[:,-1] if cam_front is not None else None
+        cam_front = unpack_sequence_dim(cam_front, b, s)[:, -1] if cam_front is not None else None
 
         x = self.projection_to_birds_eye_view(x, geometry, future_egomotion)
         return x, depth, cam_front
 
-    def sample_with_uncertainty(self, mean_states, sigma_states, b, n):
+    def sample_with_uncertainty(self, mean_states, sigma_states):
         if self.training:
             sample_states = mean_states + sigma_states.mul(0.5).exp_() * torch.randn_like(mean_states)
         else:
             sample_states = mean_states
-        sample_states = sample_states.view(b, n, *sample_states.shape[1:])
+        # sample_states = sample_states.view(b, n, *sample_states.shape[1:])
         return sample_states
 
-    def get_sample_results(self, mean_states, sigma_states, b, n):
+    def get_sample_results(self, bev_output):
+        mean_states = bev_output['mean_states']
+        sigma_states = bev_output['sigma_states']
         # just for uncertainty visualization
         sample = [np.zeros((200, 200)) for i in range(3)]
+        ex2 = [np.zeros((200, 200)) for i in range(3)]
+        e2x = [np.zeros((200, 200)) for i in range(3)]
         # bev_output = self.decoder(states)
-        sample_states = self.sample_with_uncertainty(mean_states, sigma_states, b, n)
+        bev_output['segmentation'] = self.sample_with_uncertainty(mean_states, sigma_states)
         for i in range(self.cfg.MODEL.TEST_SAMPLE_NUM):
-            sample_states = self.sample_with_uncertainty(mean_states, sigma_states, b, n)
-            bev_output = self.decoder(sample_states)
-            segmentation = bev_output['segmentation'][:, self.receptive_field-1].detach() # the present timestamp
-            pedestrain = bev_output['pedestrian'][:, self.receptive_field-1].detach()
+            bev_output['segmentation'] = self.sample_with_uncertainty(mean_states, sigma_states)
+            segmentation = bev_output['segmentation'][:, self.receptive_field - 1].detach()  # the present timestamp
+            pedestrain = bev_output['pedestrian'][:, self.receptive_field - 1].detach()
             hdmap = bev_output['hdmap'].detach()
+
+            softmax_1 = nn.Softmax(dim=0)
             # drivable
-            drivable_area = torch.argmax(hdmap[0, 2:4], dim=0).cpu().numpy()
-            # lane
-            lane_area = torch.argmax(hdmap[0, 0:2], dim=0).cpu().numpy()
+            drivable_area = softmax_1(hdmap[-1, 2:4]).cpu().numpy()
+            ex2[0] = ex2[0] + drivable_area[1] * drivable_area[1]
+            e2x[0] = e2x[0] + drivable_area[1]
+            # sample[0] = sample[0] - drivable_area[1]*np.log2(drivable_area[1])
+            # # lane
+            # lane_area = softmax_1(hdmap[-1, 0:2]).cpu().numpy()
+            # sample[1] = sample[1] - lane_area[1]*np.log2(lane_area[1])
+
             # car
-            semantic_seg_car = torch.argmax(segmentation[0], dim=0).cpu().numpy()
+            semantic_seg_car = softmax_1(segmentation[-1]).cpu().numpy()
+
+            ex2[1] = ex2[1] + semantic_seg_car[1] * semantic_seg_car[1]
+            e2x[1] = e2x[1] + semantic_seg_car[1]
+            # sample[1] = sample[1] - semantic_seg_car[1]*np.log2(semantic_seg_car[1])
+
             # pedestrain
-            semantic_seg_pedes = torch.argmax(pedestrain[0], dim=0).cpu().numpy()
+            semantic_seg_pedes = softmax_1(pedestrain[-1]).cpu().numpy()
+            ex2[2] = ex2[2] + semantic_seg_pedes[1] * semantic_seg_pedes[1]
+            e2x[2] = e2x[2] + semantic_seg_pedes[1]
+            # sample[2] = sample[2] - semantic_seg_pedes[1]*np.log2(semantic_seg_pedes[1])
 
-            drivable_area_index = drivable_area > 0
-            lane_area_index = lane_area > 0
-            semantic_seg_car_index = semantic_seg_car > 0
-            semantic_seg_pedes_index = semantic_seg_pedes > 0
-            sample[0][drivable_area_index] = sample[0][drivable_area_index]+1
-            # sample[1][lane_area_index] = sample[1][lane_area_index]+1
-            sample[1][semantic_seg_car_index] = sample[1][semantic_seg_car_index]+1
-            sample[2][semantic_seg_pedes_index] = sample[2][semantic_seg_pedes_index]+1
+        sample[0] = ex2[0] / self.cfg.MODEL.TEST_SAMPLE_NUM - (e2x[0] / self.cfg.MODEL.TEST_SAMPLE_NUM) ** 2
+        sample[1] = ex2[1] / self.cfg.MODEL.TEST_SAMPLE_NUM - (e2x[1] / self.cfg.MODEL.TEST_SAMPLE_NUM) ** 2
+        sample[2] = ex2[2] / self.cfg.MODEL.TEST_SAMPLE_NUM - (e2x[2] / self.cfg.MODEL.TEST_SAMPLE_NUM) ** 2
+        entropy = sample[1]
+        entropy = (entropy - entropy.min()) / (entropy.max() - entropy.min())
 
-        sample = [i/self.cfg.MODEL.TEST_SAMPLE_NUM for i in sample]
-        index = [np.logical_or(i  == 0, i  == 1) for i in sample]
-        entropy = np.zeros((200, 200))
-
-        for idx, sp in zip(index, sample):
-            entropy[~idx] = entropy[~idx] - (sp[~idx] * np.log2(sp[~idx]) + (1 - sp[~idx]) * np.log2(1 - sp[~idx]))
-
-        return bev_output, entropy
+        return entropy
 
     def distribution_forward(self, present_features, min_log_sigma, max_log_sigma):
         """
@@ -399,7 +429,7 @@ class STP3(nn.Module):
 
         def get_mu_sigma(mu_log_sigma):
             mu = mu_log_sigma[:, :, :self.latent_dim]
-            log_sigma = mu_log_sigma[:, :, self.latent_dim:2*self.latent_dim]
+            log_sigma = mu_log_sigma[:, :, self.latent_dim:2 * self.latent_dim]
             log_sigma = torch.clamp(log_sigma, min_log_sigma, max_log_sigma)
             sigma = torch.exp(log_sigma)
             if self.training:
@@ -408,7 +438,6 @@ class STP3(nn.Module):
                 gaussian_noise = torch.zeros((b, s, self.latent_dim), device=present_features.device)
             sample = mu + sigma * gaussian_noise
             return mu, log_sigma, sample
-
 
         if self.cfg.PROBABILISTIC.METHOD == 'GAUSSIAN':
             mu_log_sigma = self.present_distribution(present_features)
@@ -431,14 +460,16 @@ class STP3(nn.Module):
 
         elif self.cfg.PROBABILISTIC.METHOD == 'MIXGAUSSIAN':
             mu_log_sigma = self.present_distribution(present_features)
-            present_mu1, present_log_sigma1, present_sample1 = get_mu_sigma(mu_log_sigma[:, :, :2*self.latent_dim])
-            present_mu2, present_log_sigma2, present_sample2 = get_mu_sigma(mu_log_sigma[:, :, 2 * self.latent_dim : 4 * self.latent_dim])
-            present_mu3, present_log_sigma3, present_sample3 = get_mu_sigma(mu_log_sigma[:, :, 4 * self.latent_dim : 6 * self.latent_dim])
+            present_mu1, present_log_sigma1, present_sample1 = get_mu_sigma(mu_log_sigma[:, :, :2 * self.latent_dim])
+            present_mu2, present_log_sigma2, present_sample2 = get_mu_sigma(
+                mu_log_sigma[:, :, 2 * self.latent_dim: 4 * self.latent_dim])
+            present_mu3, present_log_sigma3, present_sample3 = get_mu_sigma(
+                mu_log_sigma[:, :, 4 * self.latent_dim: 6 * self.latent_dim])
             coefficient = mu_log_sigma[:, :, 6 * self.latent_dim:]
             coefficient = torch.softmax(coefficient, dim=-1)
-            sample = present_sample1 * coefficient[:,:,0:1] + \
-                     present_sample2 * coefficient[:,:,1:2] + \
-                     present_sample3 * coefficient[:,:,2:3]
+            sample = present_sample1 * coefficient[:, :, 0:1] + \
+                     present_sample2 * coefficient[:, :, 1:2] + \
+                     present_sample3 * coefficient[:, :, 2:3]
 
             # Spatially broadcast sample to the dimensions of present_features
             sample = sample.view(b, s, self.latent_dim, 1, 1).expand(b, s, self.latent_dim, h, w)
@@ -455,12 +486,12 @@ class STP3(nn.Module):
         hd_map: torch.Tensor(B, 5, 200, 200)
         semantic_pred: torch.Tensor(B, n_future, 200, 200)
         '''
-        sm_cost_fc, sm_cost_fo = self.cost_function(cost_volume, trajs[:,:,:,:2], semantic_pred, lane_divider)
+        sm_cost_fc, sm_cost_fo = self.cost_function(cost_volume, trajs[:, :, :, :2], semantic_pred, lane_divider)
 
         CS = sm_cost_fc + sm_cost_fo.sum(dim=-1)
         CC, KK = torch.topk(CS, k, dim=-1, largest=False)
 
         ii = torch.arange(len(trajs))
-        select_traj = trajs[ii[:,None], KK].squeeze(1) # (B, n_future, 3)
+        select_traj = trajs[ii[:, None], KK].squeeze(1)  # (B, n_future, 3)
 
         return select_traj

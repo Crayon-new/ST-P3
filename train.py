@@ -2,6 +2,7 @@ import os
 import time
 import socket
 import torch
+
 import pytorch_lightning as pl
 from pytorch_lightning.plugins import DDPPlugin
 from pytorch_lightning.callbacks import ModelCheckpoint
@@ -17,7 +18,6 @@ def main():
 
     trainloader, valloader = prepare_dataloaders(cfg)
     model = TrainingModule(cfg.convert_to_dict())
-
     if cfg.PRETRAINED.LOAD_WEIGHTS:
         # Load single-image instance segmentation model.
         pretrained_model_weights = torch.load(
