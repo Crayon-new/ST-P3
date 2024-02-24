@@ -1,14 +1,16 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import pytorch_lightning as pl
 
 from stp3.config import get_cfg
 from stp3.models.stp3 import STP3
-from stp3.losses import SpatialRegressionLoss, SegmentationLoss, HDmapLoss, DepthLoss
+from stp3.losses import SpatialRegressionLoss, SegmentationLoss, HDmapLoss, DepthLoss, Seg_edl_log_loss
 from stp3.metrics import IntersectionOverUnion, PanopticMetric, PlanningMetric
 from stp3.utils.geometry import cumulative_warp_features_reverse, cumulative_warp_features
 from stp3.utils.instance import predict_instance_segmentation_and_trajectories
 from stp3.utils.visualisation import visualise_output
+from stp3.utils.network import convert_belief_to_output_and_uncertainty
 
 
 class TrainingModule(pl.LightningModule):
@@ -32,15 +34,27 @@ class TrainingModule(pl.LightningModule):
 
         self.losses_fn = nn.ModuleDict()
 
-        # Semantic segmentation
-        self.losses_fn['segmentation'] = SegmentationLoss(
+        # # Semantic segmentation
+        # self.losses_fn['segmentation'] = SegmentationLoss(
+        #     class_weights=torch.Tensor(self.cfg.SEMANTIC_SEG.VEHICLE.WEIGHTS),
+        #     use_top_k=self.cfg.SEMANTIC_SEG.VEHICLE.USE_TOP_K,
+        #     top_k_ratio=self.cfg.SEMANTIC_SEG.VEHICLE.TOP_K_RATIO,
+        #     future_discount=self.cfg.FUTURE_DISCOUNT,
+        # )
+        # self.model.segmentation_weight = nn.Parameter(torch.tensor(0.0), requires_grad=True)
+        self.metric_vehicle_val = IntersectionOverUnion(self.n_classes)
+
+        self.losses_fn['segmentation_edl'] = Seg_edl_log_loss(
             class_weights=torch.Tensor(self.cfg.SEMANTIC_SEG.VEHICLE.WEIGHTS),
             use_top_k=self.cfg.SEMANTIC_SEG.VEHICLE.USE_TOP_K,
             top_k_ratio=self.cfg.SEMANTIC_SEG.VEHICLE.TOP_K_RATIO,
-            future_discount=self.cfg.FUTURE_DISCOUNT,
+            max_epochs = self.cfg.EPOCHS,
+            iters_per_epoch = self.cfg.ITERS_PER_EPOCH,
+            coef = self.cfg.COST_FUNCTION.EDL_KL_COEF
         )
-        self.model.segmentation_weight = nn.Parameter(torch.tensor(0.0), requires_grad=True)
-        self.metric_vehicle_val = IntersectionOverUnion(self.n_classes)
+
+        self.model.segmentation_edl_weight = nn.Parameter(torch.tensor(0.0), requires_grad=True)
+
 
         # Pedestrian segmentation
         if self.cfg.SEMANTIC_SEG.PEDESTRIAN.ENABLED:
@@ -98,7 +112,7 @@ class TrainingModule(pl.LightningModule):
 
         self.training_step_count = 0
 
-    def shared_step(self, batch, is_train):
+    def shared_step(self, batch, is_train, batch_idx):
         image = batch['image']
         intrinsics = batch['intrinsics']
         extrinsics = batch['extrinsics']
@@ -121,12 +135,20 @@ class TrainingModule(pl.LightningModule):
         #####
         loss = {}
         if is_train:
-            # segmentation
-            segmentation_factor = 1 / (2 * torch.exp(self.model.segmentation_weight))
-            loss['segmentation'] = segmentation_factor * self.losses_fn['segmentation'](
-                output['segmentation'], labels['segmentation'], self.model.receptive_field
+            # # segmentation
+            # segmentation_factor = 1 / (2 * torch.exp(self.model.segmentation_weight))
+            # loss['segmentation'] = segmentation_factor * self.losses_fn['segmentation'](
+            #     output['segmentation'], labels['segmentation'], self.model.receptive_field
+            # )
+            # loss['segmentation_uncertainty'] = 0.5 * self.model.segmentation_weight
+
+            # segmentation edl
+            segmentation_edl_factor = 1 / (2 * torch.exp(self.model.segmentation_edl_weight))
+            loss['segmentation_edl'] = segmentation_edl_factor * self.losses_fn['segmentation_edl'](
+                output['segmentation'], labels['segmentation'], batch_idx,
+                self.current_epoch
             )
-            loss['segmentation_uncertainty'] = 0.5 * self.model.segmentation_weight
+            loss['segmentation_edl_uncertainty'] = 0.5 * self.model.segmentation_edl_weight
 
             # Pedestrian
             if self.cfg.SEMANTIC_SEG.PEDESTRIAN.ENABLED:
@@ -248,7 +270,8 @@ class TrainingModule(pl.LightningModule):
                                                      dim=1)}
             else:
                 output = {**output, 'selected_traj': labels['gt_trajectory']}
-
+        
+        output['segmentation'], output['seg_uncertainty'] = convert_belief_to_output_and_uncertainty(output['segmentation'])
         return output, labels, loss
 
     def prepare_future_labels(self, batch):
@@ -367,7 +390,7 @@ class TrainingModule(pl.LightningModule):
         self.logger.experiment.add_video(name, visualisation_video, global_step=self.training_step_count, fps=2)
 
     def training_step(self, batch, batch_idx):
-        output, labels, loss = self.shared_step(batch, True)
+        output, labels, loss = self.shared_step(batch, True, batch_idx)
         self.training_step_count += 1
         for key, value in loss.items():
             self.logger.experiment.add_scalar('step_train_loss_' + key, value, global_step=self.training_step_count)
@@ -376,7 +399,7 @@ class TrainingModule(pl.LightningModule):
         return sum(loss.values())
 
     def validation_step(self, batch, batch_idx):
-        output, labels, loss = self.shared_step(batch, False)
+        output, labels, loss = self.shared_step(batch, False, batch_idx)
         scores = self.metric_vehicle_val.compute()
         self.log('step_val_seg_iou_dynamic', scores[1])
         self.log('step_predicted_traj_x', output['selected_traj'][0, -1, 0])
@@ -421,9 +444,9 @@ class TrainingModule(pl.LightningModule):
                                                       global_step=self.training_step_count)
                 self.metric_planning_val.reset()
 
-        self.logger.experiment.add_scalar('epoch_segmentation_weight',
-                                          1 / (2 * torch.exp(self.model.segmentation_weight)),
-                                          global_step=self.training_step_count)
+        # self.logger.experiment.add_scalar('epoch_segmentation_weight',
+        #                                   1 / (2 * torch.exp(self.model.segmentation_weight)),
+        #                                   global_step=self.training_step_count)
         if self.cfg.LIFT.GT_DEPTH:
             self.logger.experiment.add_scalar('epoch_depths_weight', 1 / (2 * torch.exp(self.model.depths_weight)),
                                               global_step=self.training_step_count)

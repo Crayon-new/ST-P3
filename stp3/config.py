@@ -37,6 +37,7 @@ _C.GPUS = [0]  # which gpus to use
 _C.PRECISION = 32  # 16bit or 32bit
 _C.BATCHSIZE = 3
 _C.EPOCHS = 20
+_C.ITERS_PER_EPOCH = 1000
 
 _C.N_WORKERS = 5
 _C.VIS_INTERVAL = 5000
@@ -47,10 +48,21 @@ _C.PRETRAINED.LOAD_WEIGHTS = False
 _C.PRETRAINED.PATH = ''
 
 _C.DATASET = CN()
-_C.DATASET.DATAROOT = '/data/Nuscenes'
+
+_C.DATASET.DATAROOT = 'data/nuscenes'
+_C.DATASET.DEPTHROOT = 'data/nuScenes_depth'
+_C.DATASET.CORRUPTION_DATAROOT = 'data/nuScenes-c'
+_C.DATASET.USE_CORRUPTION = False
+
+_C.DATASET.CORRUPTION_TYPE = 'LowLight'
+_C.DATASET.CORRUPTION_LEVEL = 'hard'
+_C.DATASET.USE_PARTIAL = True
+
+_C.DATASET.PARTIAL_RATIO = 0.5
 _C.DATASET.VERSION = 'trainval'
 _C.DATASET.NAME = 'nuscenes'
-_C.DATASET.MAP_FOLDER = '/data/Nuscenes'
+_C.DATASET.MAP_FOLDER = 'data/nuscenes'
+
 _C.DATASET.IGNORE_INDEX = 255  # Ignore index when creating flow/offset labels
 _C.DATASET.FILTER_INVISIBLE_VEHICLES = True  # Filter vehicles that are not visible from the cameras
 _C.DATASET.SAVE_DIR = 'datas'
@@ -160,6 +172,13 @@ _C.COST_FUNCTION.LRDIVIDER = 10.
 _C.COST_FUNCTION.COMFORT = 0.1
 _C.COST_FUNCTION.PROGRESS = 0.5
 _C.COST_FUNCTION.VOLUME = 100.
+
+_C.COST_FUNCTION.KLLoss_WEIGHT = 0.1
+_C.COST_FUNCTION.KLLoss_SIGMA_RANGE = 1.0
+_C.COST_FUNCTION.KLLoss_GAMMA = 1.0
+_C.COST_FUNCTION.UNCERTAINTY_WEIGHT = 0.5
+_C.COST_FUNCTION.KLLoss_GAMMA = 1.0
+_C.COST_FUNCTION.EDL_KL_COEF = 0.06
 
 def get_parser():
     parser = argparse.ArgumentParser(description='Fiery training')

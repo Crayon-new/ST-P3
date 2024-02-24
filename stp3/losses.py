@@ -177,3 +177,69 @@ class ProbabilisticLoss(nn.Module):
 
 
         return kl_loss
+
+class Seg_edl_log_loss(nn.Module):
+    def __init__(self, class_weights, use_top_k, top_k_ratio, max_epochs, iters_per_epoch, coef=0.06):
+        super(Seg_edl_log_loss, self).__init__()
+        self.max_epochs = max_epochs
+        self.iters_per_epoch = iters_per_epoch
+        self.coef = coef
+        # TODO: different class_weights for diff classes
+        self.class_weights = class_weights
+        self.use_top_k = use_top_k
+        self.top_k_ratio = top_k_ratio
+
+    @staticmethod
+    def kl_divergence(alpha, device=None):
+        ones =torch.ones(alpha.size(), dtype=torch.float32, device=device)
+        #ones = torch.ones([1, num_classes], dtype=torch.float32, device=device)
+        sum_alpha = torch.sum(alpha, dim=1, keepdim=True)
+        first_term = (
+            torch.lgamma(sum_alpha)
+            - torch.lgamma(alpha).sum(dim=1, keepdim=True)
+            + torch.lgamma(ones).sum(dim=1, keepdim=True)
+            - torch.lgamma(ones.sum(dim=1, keepdim=True))
+        )
+        second_term = (
+            (alpha - ones)
+            .mul(torch.digamma(alpha) - torch.digamma(sum_alpha))
+            .sum(dim=1, keepdim=True)
+        )
+        kl = first_term + second_term
+        return kl
+
+    def edl_loss(self, alpha, target, cur_iter, cur_epoch):
+        device=alpha.device
+        S = torch.sum(alpha, dim=1, keepdim=True)
+
+        A = torch.sum(target * (torch.log(S) - torch.log(alpha)), dim=1, keepdim=True)
+
+        den = self.max_epochs * self.iters_per_epoch
+        numer = ((cur_epoch) * self.iters_per_epoch) + cur_iter
+        annealing_coef = torch.min(torch.tensor(1.0, dtype=torch.float32),torch.tensor(numer / den, dtype=torch.float32)).to(device)
+
+        kl_alpha = (alpha - 1) * (1 - target) + 1
+        kl_div = (torch.tensor([[self.coef]]).to(device)) * annealing_coef * Seg_edl_log_loss.kl_divergence(kl_alpha, device=device)
+
+        return A + kl_div
+
+    def forward(self, predict, target, cur_iter, cur_epoch):
+        b, s, c, h, w = predict.shape
+        target = F.one_hot(target.squeeze(dim=2), num_classes=c)
+        target = target.permute(0, 1, 4, 2, 3)
+        predict = predict.view(b * s, c, h, w)
+        target = target.view(b * s, c, h, w)
+
+        evidence = F.softplus(predict)
+        alpha = evidence + 1
+
+        loss = self.edl_loss(alpha, target, cur_iter, cur_epoch)
+
+        loss = loss.view(b, s, -1)
+        if self.use_top_k:
+            # Penalises the top-k hardest pixels
+            k = int(self.top_k_ratio * loss.shape[2])
+            loss, _ = torch.sort(loss, dim=2, descending=True)
+            loss = loss[:, :, :k]
+
+        return torch.mean(loss)

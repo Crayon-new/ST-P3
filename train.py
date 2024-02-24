@@ -16,6 +16,7 @@ def main():
     cfg = get_cfg(args)
 
     trainloader, valloader = prepare_dataloaders(cfg)
+    cfg.ITERS_PER_EPOCH = len(trainloader)
     model = TrainingModule(cfg.convert_to_dict())
 
     if cfg.PRETRAINED.LOAD_WEIGHTS:
@@ -49,6 +50,7 @@ def main():
         max_epochs=cfg.EPOCHS,
         weights_summary='full',
         logger=tb_logger,
+        num_sanity_val_steps=0,
         log_every_n_steps=cfg.LOGGING_INTERVAL,
         plugins=DDPPlugin(find_unused_parameters=False),
         profiler='simple',

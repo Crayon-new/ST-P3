@@ -1,6 +1,16 @@
 import torch
 import torch.nn as nn
 import torchvision
+import torch.nn.functional as F
+
+def convert_belief_to_output_and_uncertainty(belief):
+    b, n, c, h, w = belief.shape
+    evidence = F.softplus(belief)
+    alpha = evidence + 1
+    S = torch.sum(alpha, dim=2, keepdim=True)
+    output = alpha / S
+    uncertainty = c / S
+    return output, uncertainty
 
 def pack_sequence_dim(x):
     b, s = x.shape[:2]
