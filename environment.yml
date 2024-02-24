@@ -1,8 +1,7 @@
 name: stp3
 channels:
-  - defaults
-  - conda-forge
-  - pytorch
+  - http://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge/
+  - http://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/pytorch/
 dependencies:
 - python=3.7.10
 - pytorch=1.10.2
