@@ -208,11 +208,13 @@ class Seg_edl_log_loss(nn.Module):
         kl = first_term + second_term
         return kl
 
-    def edl_loss(self, alpha, target, cur_iter, cur_epoch):
+    def edl_loss(self, alpha, target, cur_iter, cur_epoch, class_weights):
         device=alpha.device
         S = torch.sum(alpha, dim=1, keepdim=True)
 
         A = torch.sum(target * (torch.log(S) - torch.log(alpha)), dim=1, keepdim=True)
+        # different class_weights for diff classes
+        A = A * class_weights
 
         den = self.max_epochs * self.iters_per_epoch
         numer = ((cur_epoch) * self.iters_per_epoch) + cur_iter
@@ -225,6 +227,8 @@ class Seg_edl_log_loss(nn.Module):
 
     def forward(self, predict, target, cur_iter, cur_epoch):
         b, s, c, h, w = predict.shape
+        class_weights = self.class_weights[target].to(predict.device)
+        class_weights = class_weights.view(b * s, 1, h, w)
         target = F.one_hot(target.squeeze(dim=2), num_classes=c)
         target = target.permute(0, 1, 4, 2, 3)
         predict = predict.view(b * s, c, h, w)
@@ -233,7 +237,7 @@ class Seg_edl_log_loss(nn.Module):
         evidence = F.softplus(predict)
         alpha = evidence + 1
 
-        loss = self.edl_loss(alpha, target, cur_iter, cur_epoch)
+        loss = self.edl_loss(alpha, target, cur_iter, cur_epoch, class_weights=class_weights)
 
         loss = loss.view(b, s, -1)
         if self.use_top_k:
