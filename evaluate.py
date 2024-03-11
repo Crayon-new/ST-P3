@@ -49,6 +49,15 @@ def eval(checkpoint_path, dataroot, debug_mode=False):
     cfg.DATASET.DATAROOT = dataroot
     cfg.DATASET.MAP_FOLDER = dataroot
 
+    cfg.MODEL.SAMPLE_RESULTS = True
+
+    cfg.DATASET.USE_CORRUPTION = False
+    cfg.DATASET.CORRUPTION_TYPE = 'Brightness'
+    cfg.DATASET.CORRUPTION_LEVEL = 'hard'
+    cfg.DATASET.CORRUPTION_DATAROOT = 'data/nuScenes-c'
+
+    cfg.MODEL.TEST_SAMPLE_NUM = 100
+
     dataroot = cfg.DATASET.DATAROOT
     nworkers = cfg.N_WORKERS
     nusc = NuScenes(version='v1.0-{}'.format(cfg.DATASET.VERSION), dataroot=dataroot, verbose=False)
@@ -283,7 +292,7 @@ def save(output, labels, batch, n_present, frame, save_path):
     if 'seg_uncertainty' in output:
 
         # sigma
-        plt.subplot(gs[4:6, 1])
+        plt.subplot(gs[2:4, 2])
 
         seg_uncertainty = output['seg_uncertainty'][0].detach().cpu().numpy()
         seg_uncertainty = np.mean(seg_uncertainty[n_present - 1], axis=0)
@@ -296,31 +305,6 @@ def save(output, labels, batch, n_present, frame, save_path):
         plt.fill(pts[:, 0], pts[:, 1], '#76b900')
         plt.xlim((200, 0))
         plt.ylim((0, 200))
-
-    if 'depth_prediction' in output:
-        plt.subplot(gs[4:6, 2])
-        depth = output['depth_prediction'].detach().cpu()
-        depth = depth[0][n_present-1][1]+1e-20
-        depth = depth.softmax(dim=0).numpy()
-        depth_entropy = -np.sum(depth*np.log2(depth), axis=0)
-        # depth_entropy = ndimage.zoom(depth_entropy, (224 / depth_entropy.shape[0], 480 / depth_entropy.shape[1]))
-        cmap = cm.ScalarMappable(cmap='rainbow')
-        plt.imshow(depth_entropy, cmap='hot')
-        plt.colorbar()
-        plt.axis('off')
-
-        plt.subplot(gs[4:6, 1])
-        depth = output['depth_prediction'].detach().cpu().numpy()
-        depth = depth[0][n_present - 1][1]
-        depth = np.argmax(depth, axis=0)
-        # depth = ndimage.zoom(depth, (224 / depth.shape[0], 480 / depth.shape[1]))
-        cmap = cm.ScalarMappable(cmap='rainbow')
-
-        plt.imshow(depth, cmap='rainbow')
-        plt.colorbar()
-        plt.axis('off')
-        # plt.xlim((200, 0))
-        # plt.ylim((0, 200))
 
     # groud truth representations
     hdmap = labels['hdmap'].detach()

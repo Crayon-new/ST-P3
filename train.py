@@ -9,11 +9,16 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from stp3.config import get_parser, get_cfg
 from stp3.datas.dataloaders import prepare_dataloaders
 from stp3.trainer import TrainingModule
+import importlib
 
 
 def main():
     args = get_parser().parse_args()
     cfg = get_cfg(args)
+
+    # register module
+    importlib.import_module('stp3.models.transformer')
+    importlib.import_module('mmdet.models.utils')
 
     trainloader, valloader = prepare_dataloaders(cfg)
     cfg.ITERS_PER_EPOCH = len(trainloader)

@@ -11,6 +11,9 @@ from stp3.models.decoder import Decoder
 from stp3.models.planning_model import Planning
 from stp3.utils.network import pack_sequence_dim, unpack_sequence_dim, set_bn_momentum
 from stp3.utils.geometry import calculate_birds_eye_view_parameters, VoxelsSumming, pose_vec2mat
+from mmcv import Config
+from mmcv.cnn.bricks.transformer import build_transformer_layer_sequence
+
 
 class STP3(nn.Module):
     def __init__(self, cfg):
@@ -86,6 +89,10 @@ class STP3(nn.Module):
                 n_res_layers=self.cfg.MODEL.FUTURE_PRED.N_RES_LAYERS,
             )
 
+            self.transformer_decoder_cfg = Config.fromfile(self.cfg.TRANSFORMER_CONFIG_PATH)
+            self.transformer_decoder = build_transformer_layer_sequence(self.transformer_decoder_cfg.decoder)
+            # self.transformer_decoder.init_weights()
+
         # Decoder
         self.decoder = Decoder(
             in_channels=self.future_pred_in_channels,
@@ -155,22 +162,25 @@ class STP3(nn.Module):
         states = self.temporal_model(x)
 
         if self.n_future > 0:
-            present_state = states[:, -1:].contiguous()
+            future_states = self.transformer_decoder(states, self.cfg.TIME_RECEPTIVE_FIELD, self.cfg.N_FUTURE_FRAMES)
+            states = torch.cat([states, future_states], 1)
 
-            b, _, c, h, w = present_state.shape
-
-            if self.cfg.PROBABILISTIC.ENABLED:
-                sample = self.distribution_forward(
-                    present_state,
-                    min_log_sigma=self.cfg.MODEL.DISTRIBUTION.MIN_LOG_SIGMA,
-                    max_log_sigma=self.cfg.MODEL.DISTRIBUTION.MAX_LOG_SIGMA,
-                )
-                future_prediction_input = sample
-            else:
-                future_prediction_input = present_state.new_zeros(b, 1, self.latent_dim, h, w)
-
-            # predict the future
-            states = self.future_prediction(future_prediction_input, states) #(2, 9, 64, 200, 200)
+            # present_state = states[:, -1:].contiguous()
+            #
+            # b, _, c, h, w = present_state.shape
+            #
+            # if self.cfg.PROBABILISTIC.ENABLED:
+            #     sample = self.distribution_forward(
+            #         present_state,
+            #         min_log_sigma=self.cfg.MODEL.DISTRIBUTION.MIN_LOG_SIGMA,
+            #         max_log_sigma=self.cfg.MODEL.DISTRIBUTION.MAX_LOG_SIGMA,
+            #     )
+            #     future_prediction_input = sample
+            # else:
+            #     future_prediction_input = present_state.new_zeros(b, 1, self.latent_dim, h, w)
+            #
+            # # predict the future
+            # states = self.future_prediction(future_prediction_input, states) #(2, 9, 64, 200, 200)
 
             # predict BEV outputs
             bev_output = self.decoder(states)

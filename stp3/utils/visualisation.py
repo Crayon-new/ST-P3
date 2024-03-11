@@ -259,10 +259,10 @@ def visualise_output(labels, output, cfg):
         planning_plot = plot_planning(labels['hdmap'][b], labels['gt_trajectory'][b], cfg)
         planning_plot = make_contour(planning_plot)
 
-        uncertainty_label_plot = np.zeros_like(semantic_plot)
+        # uncertainty_label_plot = np.zeros_like(semantic_plot)
 
         out_t.append(np.concatenate([instance_plot, future_flow_plot,
-                                     semantic_plot, center_plot, offset_plot, pedestrian_plot, planning_plot, uncertainty_label_plot], axis=0))
+                                     semantic_plot, center_plot, offset_plot, pedestrian_plot, planning_plot], axis=0))
 
         # Predictions
         semantic_seg = output['segmentation'].argmax(dim=2).detach().cpu().numpy()
@@ -311,12 +311,12 @@ def visualise_output(labels, output, cfg):
         else:
             planning_plot = np.zeros_like(semantic_plot)
         
-        uncertainty = output['seg_uncertainty'].detach().squeeze(2).cpu().numpy()
-        uncertainty_plot = (np.expand_dims(uncertainty[b, t][::-1, ::-1], 2).repeat(3,axis=2)*255).astype(int)
-        uncertainty_plot = make_contour(uncertainty_plot)
+        # uncertainty = output['seg_uncertainty'].detach().squeeze(2).cpu().numpy()
+        # uncertainty_plot = (np.expand_dims(uncertainty[b, t][::-1, ::-1], 2).repeat(3,axis=2)*255).astype(int)
+        # uncertainty_plot = make_contour(uncertainty_plot)
 
         out_t.append(np.concatenate([instance_plot, future_flow_plot,
-                                     semantic_plot, center_plot, offset_plot, pedestrian_plot, planning_plot, uncertainty_plot], axis=0))
+                                     semantic_plot, center_plot, offset_plot, pedestrian_plot, planning_plot], axis=0))
         out_t = np.concatenate(out_t, axis=1)
         # Shape (C, H, W)
         out_t = out_t.transpose((2, 0, 1))

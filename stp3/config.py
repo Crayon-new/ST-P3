@@ -47,6 +47,8 @@ _C.PRETRAINED = CN()
 _C.PRETRAINED.LOAD_WEIGHTS = False
 _C.PRETRAINED.PATH = ''
 
+_C.TRANSFORMER_CONFIG_PATH = 'stp3/configs/future_decoder.py'
+
 _C.DATASET = CN()
 
 _C.DATASET.DATAROOT = 'data/nuscenes'

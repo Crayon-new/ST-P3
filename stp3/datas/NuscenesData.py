@@ -235,6 +235,11 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
 
             # Load image
             image_filename = os.path.join(self.dataroot, camera_sample['filename'])
+
+            if self.cfg.DATASET.USE_CORRUPTION:
+                image_filename = os.path.join(self.cfg.DATASET.CORRUPTION_DATAROOT,self.cfg.DATASET.CORRUPTION_TYPE,
+                                              self.cfg.DATASET.CORRUPTION_LEVEL, camera_sample['filename'][8:])
+
             img = Image.open(image_filename)
             # Resize and crop
             img = resize_and_crop_image(
