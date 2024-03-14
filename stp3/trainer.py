@@ -48,9 +48,9 @@ class TrainingModule(pl.LightningModule):
             class_weights=torch.Tensor(self.cfg.SEMANTIC_SEG.VEHICLE.WEIGHTS),
             use_top_k=self.cfg.SEMANTIC_SEG.VEHICLE.USE_TOP_K,
             top_k_ratio=self.cfg.SEMANTIC_SEG.VEHICLE.TOP_K_RATIO,
-            max_epochs = self.cfg.EPOCHS,
-            iters_per_epoch = self.cfg.ITERS_PER_EPOCH,
-            coef = self.cfg.COST_FUNCTION.EDL_KL_COEF
+            max_epochs=self.cfg.EPOCHS,
+            iters_per_epoch=self.cfg.ITERS_PER_EPOCH,
+            coef=self.cfg.COST_FUNCTION.EDL_KL_COEF
         )
 
         self.model.segmentation_edl_weight = nn.Parameter(torch.tensor(0.0), requires_grad=True)
@@ -387,13 +387,13 @@ class TrainingModule(pl.LightningModule):
         name = f'{prefix}_outputs'
         if prefix == 'val':
             name = name + f'_{batch_idx}'
-        self.logger.experiment.add_video(name, visualisation_video, global_step=self.training_step_count, fps=2)
+        self.logger.experiment[0].add_video(name, visualisation_video, global_step=self.training_step_count, fps=2)
 
     def training_step(self, batch, batch_idx):
         output, labels, loss = self.shared_step(batch, True, batch_idx)
         self.training_step_count += 1
         for key, value in loss.items():
-            self.logger.experiment.add_scalar('step_train_loss_' + key, value, global_step=self.training_step_count)
+            self.logger.experiment[0].add_scalar('step_train_loss_' + key, value, global_step=self.training_step_count)
         if self.training_step_count % self.cfg.VIS_INTERVAL == 0:
             self.visualise(labels, output, batch_idx, prefix='train')
         return sum(loss.values())
@@ -413,61 +413,62 @@ class TrainingModule(pl.LightningModule):
     def shared_epoch_end(self, step_outputs, is_train):
         if not is_train:
             scores = self.metric_vehicle_val.compute()
-            self.logger.experiment.add_scalar('epoch_val_all_seg_iou_dynamic', scores[1],
+            self.logger.experiment[0].add_scalar('epoch_val_all_seg_iou_dynamic', scores[1],
                                               global_step=self.training_step_count)
+            self.logger[1].log_metrics({'epoch_val_all_seg_iou_dynamic': scores[1]}, step=self.training_step_count)
             self.metric_vehicle_val.reset()
 
             if self.cfg.SEMANTIC_SEG.PEDESTRIAN.ENABLED:
                 scores = self.metric_pedestrian_val.compute()
-                self.logger.experiment.add_scalar('epoch_val_all_seg_iou_pedestrian', scores[1],
+                self.logger.experiment[0].add_scalar('epoch_val_all_seg_iou_pedestrian', scores[1],
                                                   global_step=self.training_step_count)
                 self.metric_pedestrian_val.reset()
 
             if self.cfg.SEMANTIC_SEG.HDMAP.ENABLED:
                 for i, name in enumerate(self.hdmap_class):
                     scores = self.metric_hdmap_val[i].compute()
-                    self.logger.experiment.add_scalar('epoch_val_hdmap_iou_' + name, scores[1],
+                    self.logger.experiment[0].add_scalar('epoch_val_hdmap_iou_' + name, scores[1],
                                                       global_step=self.training_step_count)
                     self.metric_hdmap_val[i].reset()
 
             if self.cfg.INSTANCE_SEG.ENABLED:
                 scores = self.metric_panoptic_val.compute()
                 for key, value in scores.items():
-                    self.logger.experiment.add_scalar(f'epoch_val_all_ins_{key}_vehicle', value[1].item(),
+                    self.logger.experiment[0].add_scalar(f'epoch_val_all_ins_{key}_vehicle', value[1].item(),
                                                       global_step=self.training_step_count)
                 self.metric_panoptic_val.reset()
 
             if self.cfg.PLANNING.ENABLED:
                 scores = self.metric_planning_val.compute()
                 for key, value in scores.items():
-                    self.logger.experiment.add_scalar('epoch_val_plan_' + key, value.mean(),
+                    self.logger.experiment[0].add_scalar('epoch_val_plan_' + key, value.mean(),
                                                       global_step=self.training_step_count)
                 self.metric_planning_val.reset()
 
-        # self.logger.experiment.add_scalar('epoch_segmentation_weight',
+        # self.logger.experiment[0].add_scalar('epoch_segmentation_weight',
         #                                   1 / (2 * torch.exp(self.model.segmentation_weight)),
         #                                   global_step=self.training_step_count)
         if self.cfg.LIFT.GT_DEPTH:
-            self.logger.experiment.add_scalar('epoch_depths_weight', 1 / (2 * torch.exp(self.model.depths_weight)),
+            self.logger.experiment[0].add_scalar('epoch_depths_weight', 1 / (2 * torch.exp(self.model.depths_weight)),
                                               global_step=self.training_step_count)
         if self.cfg.SEMANTIC_SEG.PEDESTRIAN.ENABLED:
-            self.logger.experiment.add_scalar('epoch_pedestrian_weight',
+            self.logger.experiment[0].add_scalar('epoch_pedestrian_weight',
                                               1 / (2 * torch.exp(self.model.pedestrian_weight)),
                                               global_step=self.training_step_count)
         if self.cfg.SEMANTIC_SEG.HDMAP.ENABLED:
-            self.logger.experiment.add_scalar('epoch_hdmap_weight', 1 / (2 * torch.exp(self.model.hdmap_weight)),
+            self.logger.experiment[0].add_scalar('epoch_hdmap_weight', 1 / (2 * torch.exp(self.model.hdmap_weight)),
                                               global_step=self.training_step_count)
         if self.cfg.INSTANCE_SEG.ENABLED:
-            self.logger.experiment.add_scalar('epoch_centerness_weight',
+            self.logger.experiment[0].add_scalar('epoch_centerness_weight',
                                               1 / (2 * torch.exp(self.model.centerness_weight)),
                                               global_step=self.training_step_count)
-            self.logger.experiment.add_scalar('epoch_offset_weight', 1 / (2 * torch.exp(self.model.offset_weight)),
+            self.logger.experiment[0].add_scalar('epoch_offset_weight', 1 / (2 * torch.exp(self.model.offset_weight)),
                                               global_step=self.training_step_count)
         if self.cfg.INSTANCE_FLOW.ENABLED:
-            self.logger.experiment.add_scalar('epoch_flow_weight', 1 / (2 * torch.exp(self.model.flow_weight)),
+            self.logger.experiment[0].add_scalar('epoch_flow_weight', 1 / (2 * torch.exp(self.model.flow_weight)),
                                               global_step=self.training_step_count)
         if self.cfg.PLANNING.ENABLED:
-            self.logger.experiment.add_scalar('epoch_planning_weight', 1 / (2 * torch.exp(self.model.planning_weight)),
+            self.logger.experiment[0].add_scalar('epoch_planning_weight', 1 / (2 * torch.exp(self.model.planning_weight)),
                                               global_step=self.training_step_count)
 
     def training_epoch_end(self, step_outputs):

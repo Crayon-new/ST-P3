@@ -38,6 +38,7 @@ def main():
         cfg.LOG_DIR, time.strftime('%d%B%Yat%H_%M_%S%Z') + '_' + socket.gethostname() + '_' + cfg.TAG
     )
     tb_logger = pl.loggers.TensorBoardLogger(save_dir=save_dir)
+    csv_logger = pl.loggers.CSVLogger(save_dir=save_dir, name='my_model')
 
     checkpoint_callback = ModelCheckpoint(
         monitor='step_val_seg_iou_dynamic',
@@ -54,7 +55,7 @@ def main():
         gradient_clip_val=cfg.GRAD_NORM_CLIP,
         max_epochs=cfg.EPOCHS,
         weights_summary='full',
-        logger=tb_logger,
+        logger=[tb_logger, csv_logger],
         num_sanity_val_steps=0,
         log_every_n_steps=cfg.LOGGING_INTERVAL,
         plugins=DDPPlugin(find_unused_parameters=False),
