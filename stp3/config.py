@@ -45,7 +45,7 @@ _C.LOGGING_INTERVAL = 500
 
 _C.PRETRAINED = CN()
 _C.PRETRAINED.LOAD_WEIGHTS = False
-_C.PRETRAINED.PATH = ''
+_C.PRETRAINED.PATH = 'tensorboard_logs/26February2024at13_07_26CST_rtxgpu005_Perception/default/version_0/checkpoints/epoch=19-step=21759.ckpt'
 
 _C.TRANSFORMER_CONFIG_PATH = 'stp3/configs/future_decoder.py'
 

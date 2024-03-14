@@ -174,7 +174,7 @@ class FutureDecoder(TransformerLayerSequence):
         tempo_ref_2d = torch.stack([ref_2d.clone() for _ in range(n_past)], 1).permute(0, 2, 1, 3, 4).squeeze(3)
 
         # key, value position embedding for cross attention
-        prev_bev = prev_bev + bev_pos
+        prev_bev = prev_bev + bev_pos.unsqueeze(1)
 
         # key, value time embedding for cross attention
         prev_bev = prev_bev + bev_time[:, :n_past, :, :]

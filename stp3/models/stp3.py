@@ -70,24 +70,24 @@ class STP3(nn.Module):
 
         self.future_pred_in_channels = self.temporal_model.out_channels
         if self.n_future > 0:
-            # probabilistic sampling
-            if self.cfg.PROBABILISTIC.ENABLED:
-                # Distribution networks
-                self.present_distribution = DistributionModule(
-                    self.future_pred_in_channels,
-                    self.latent_dim,
-                    method=self.cfg.PROBABILISTIC.METHOD
-                )
+            # probabilistic sampling unused
+            # if self.cfg.PROBABILISTIC.ENABLED:
+            #     # Distribution networks
+            #     self.present_distribution = DistributionModule(
+            #         self.future_pred_in_channels,
+            #         self.latent_dim,
+            #         method=self.cfg.PROBABILISTIC.METHOD
+            #     )
 
-            # Future prediction
-            self.future_prediction = FuturePrediction(
-                in_channels=self.future_pred_in_channels,
-                latent_dim=self.latent_dim,
-                n_future=self.n_future,
-                mixture=self.cfg.MODEL.FUTURE_PRED.MIXTURE,
-                n_gru_blocks=self.cfg.MODEL.FUTURE_PRED.N_GRU_BLOCKS,
-                n_res_layers=self.cfg.MODEL.FUTURE_PRED.N_RES_LAYERS,
-            )
+            # # Future prediction unused
+            # self.future_prediction = FuturePrediction(
+            #     in_channels=self.future_pred_in_channels,
+            #     latent_dim=self.latent_dim,
+            #     n_future=self.n_future,
+            #     mixture=self.cfg.MODEL.FUTURE_PRED.MIXTURE,
+            #     n_gru_blocks=self.cfg.MODEL.FUTURE_PRED.N_GRU_BLOCKS,
+            #     n_res_layers=self.cfg.MODEL.FUTURE_PRED.N_RES_LAYERS,
+            # )
 
             self.transformer_decoder_cfg = Config.fromfile(self.cfg.TRANSFORMER_CONFIG_PATH)
             self.transformer_decoder = build_transformer_layer_sequence(self.transformer_decoder_cfg.decoder)

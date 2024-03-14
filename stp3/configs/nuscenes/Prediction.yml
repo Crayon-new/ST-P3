@@ -1,8 +1,8 @@
 TAG: 'Prediction'
 
-GPUS: [0, 1, 2, 3]
+GPUS: [0, 1, 2, 3, 4, 5, 6, 7]
 
-BATCHSIZE: 2
+BATCHSIZE: 1
 PRECISION: 16
 EPOCHS: 20
 
