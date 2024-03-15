@@ -16,10 +16,11 @@ from stp3.trainer import TrainingModule
 from stp3.metrics import IntersectionOverUnion, PanopticMetric, PlanningMetric
 from stp3.utils.network import preprocess_batch, NormalizeInverse, convert_belief_to_output_and_uncertainty
 from stp3.utils.instance import predict_instance_segmentation_and_trajectories
-from stp3.utils.visualisation import make_contour
+from stp3.utils.visualisation import make_contour, plot_prediction
 from stp3.config import get_cfg
 import matplotlib.cm as cm
 from scipy import ndimage
+import importlib
 
 def mk_save_dir(debug_mode):
     now = datetime.datetime.now()
@@ -127,11 +128,17 @@ def eval(checkpoint_path, dataroot, debug_mode=False):
                 metric_hdmap_val[i](hdmap_prediction, labels['hdmap'][:, i:i + 1])
 
         if cfg.INSTANCE_SEG.ENABLED:
-            pred_consistent_instance_seg = predict_instance_segmentation_and_trajectories(
-                output, compute_matched_centers=False, make_consistent=True
+            pred_consistent_instance_seg, matched_centers= predict_instance_segmentation_and_trajectories(
+                output, compute_matched_centers=True, make_consistent=True
             )
             metric_panoptic_val(pred_consistent_instance_seg[:, n_present - 1:],
                                      labels['instance'][:, n_present - 1:])
+            output['prediction_np_result'] = plot_prediction(pred_consistent_instance_seg, matched_centers)
+
+            target_consistent_instance_seg, target_matched_centers= predict_instance_segmentation_and_trajectories(
+                labels, compute_matched_centers=True, make_consistent=True
+            )
+            labels['target_prediction_result'] = plot_prediction(target_consistent_instance_seg, target_matched_centers)
 
         if cfg.PLANNING.ENABLED:
             occupancy = torch.logical_or(seg_prediction, pedestrian_prediction)
@@ -152,6 +159,8 @@ def eval(checkpoint_path, dataroot, debug_mode=False):
                 metric_planning_val[i](final_traj[:,:cur_time].detach(), labels['gt_trajectory'][:,1:cur_time+1], occupancy[:,:cur_time])
 
         if index % 1 == 0:
+            if cfg.PLANNING.ENABLED:
+                output = {**output, 'pred_trajectory': final_traj}
             save(output, labels, batch, n_present, index, save_path)
 
 
@@ -184,11 +193,6 @@ def eval(checkpoint_path, dataroot, debug_mode=False):
         print(f'{key} : {value.item()}')
 
 def save(output, labels, batch, n_present, frame, save_path):
-    hdmap = output['hdmap'].detach()
-    output['segmentation'], output['seg_uncertainty'] = convert_belief_to_output_and_uncertainty(output['segmentation'])
-    segmentation = output['segmentation'][:, n_present - 1].detach()
-    seg_uncertainty = output['seg_uncertainty'][:, n_present - 1].detach()
-    pedestrian = output['pedestrian'][:, n_present - 1].detach()
     gt_trajs = labels['gt_trajectory'].cpu()
     if 'pred_trajectory' in output:
         gt_trajs = output['pred_trajectory'].detach().cpu()
@@ -249,23 +253,42 @@ def save(output, labels, batch, n_present, frame, save_path):
     showing[:, :] = np.array([219 / 255, 215 / 255, 215 / 255])
 
     # drivable
-    area = torch.argmax(hdmap[0, 2:4], dim=0).cpu().numpy()
-    hdmap_index = area > 0
-    showing[hdmap_index] = np.array([161 / 255, 158 / 255, 158 / 255])
+    if output['hdmap'] is not None:
+        hdmap = output['hdmap'].detach()
+        area = torch.argmax(hdmap[0, 2:4], dim=0).cpu().numpy()
+        hdmap_index = area > 0
+        showing[hdmap_index] = np.array([161 / 255, 158 / 255, 158 / 255])
 
-    # lane
-    area = torch.argmax(hdmap[0, 0:2], dim=0).cpu().numpy()
-    hdmap_index = area > 0
-    showing[hdmap_index] = np.array([84 / 255, 70 / 255, 70 / 255])
+        # lane
+        area = torch.argmax(hdmap[0, 0:2], dim=0).cpu().numpy()
+        hdmap_index = area > 0
+        showing[hdmap_index] = np.array([84 / 255, 70 / 255, 70 / 255])
+    else:
+        hdmap = labels['hdmap'].detach()
+        # lane
+        area = hdmap[0, 0:2][1].cpu().numpy()
+        hdmap_index = area > 0
+        showing[hdmap_index] = np.array([161 / 255, 158 / 255, 158 / 255])
+
+        # drivable
+        area = hdmap[0, 0:2][0].cpu().numpy()
+        hdmap_index = area > 0
+        showing[hdmap_index] = np.array([84 / 255, 70 / 255, 70 / 255])
 
     # semantic
-    semantic_seg = torch.argmax(segmentation[0], dim=0).cpu().numpy()
-    semantic_index = semantic_seg > 0
-    showing[semantic_index] = np.array([255 / 255, 128 / 255, 0 / 255])
+    if output['segmentation'] is not None:
+        output['segmentation'], output['seg_uncertainty'] = convert_belief_to_output_and_uncertainty(output['segmentation'])
+        segmentation = output['segmentation'][:, n_present - 1].detach()
+        seg_uncertainty = output['seg_uncertainty'][:, n_present - 1].detach()
+        semantic_seg = torch.argmax(segmentation[0], dim=0).cpu().numpy()
+        semantic_index = semantic_seg > 0
+        showing[semantic_index] = np.array([255 / 255, 128 / 255, 0 / 255])
 
-    pedestrian_seg = torch.argmax(pedestrian[0], dim=0).cpu().numpy()
-    pedestrian_index = pedestrian_seg > 0
-    showing[pedestrian_index] = np.array([28 / 255, 81 / 255, 227 / 255])
+    if output['pedestrian'] is not None:
+        pedestrian = output['pedestrian'][:, n_present - 1].detach()
+        pedestrian_seg = torch.argmax(pedestrian[0], dim=0).cpu().numpy()
+        pedestrian_index = pedestrian_seg > 0
+        showing[pedestrian_index] = np.array([28 / 255, 81 / 255, 227 / 255])
 
     plt.imshow(make_contour(showing))
     plt.axis('off')
@@ -306,6 +329,16 @@ def save(output, labels, batch, n_present, frame, save_path):
         plt.xlim((200, 0))
         plt.ylim((0, 200))
 
+    if 'target_prediction_result' in labels:
+        plt.subplot(gs[4:6, 1])
+        plt.imshow(labels['target_prediction_result'])
+        plt.axis('off')
+
+        plt.fill(pts[:, 0], pts[:, 1], '#76b900')
+
+        plt.xlim((200, 0))
+        plt.ylim((0, 200))
+
     # groud truth representations
     hdmap = labels['hdmap'].detach()
 
@@ -329,10 +362,11 @@ def save(output, labels, batch, n_present, frame, save_path):
     semantic_index = semantic_seg > 0
     showing[semantic_index] = np.array([255 / 255, 128 / 255, 0 / 255])
 
-    pedestrian = labels['pedestrian'][:, n_present - 1].detach()
-    pedestrian_seg = pedestrian[0][0].cpu().numpy()
-    pedestrian_index = pedestrian_seg > 0
-    showing[pedestrian_index] = np.array([28 / 255, 81 / 255, 227 / 255])
+    if 'pedestrain' in labels and labels['pedestrian'] is not None:
+        pedestrian = labels['pedestrian'][:, n_present - 1].detach()
+        pedestrian_seg = pedestrian[0][0].cpu().numpy()
+        pedestrian_index = pedestrian_seg > 0
+        showing[pedestrian_index] = np.array([28 / 255, 81 / 255, 227 / 255])
 
     plt.imshow(make_contour(showing))
     plt.axis('off')
@@ -344,6 +378,14 @@ def save(output, labels, batch, n_present, frame, save_path):
 
     plt.plot(gt_trajs[:, 0], gt_trajs[:, 1], linewidth=3.0)
 
+    if 'prediction_np_result' in output:
+        plt.subplot(gs[4:6, 0])
+        plt.imshow(make_contour(output['prediction_np_result'][::-1, ::-1]))
+        plt.axis('off')
+        plt.axis('off')
+
+        plt.fill(pts[:, 0], pts[:, 1], '#76b900')
+
     plt.savefig(save_path / ('%04d.png' % frame))
     plt.close()
 
@@ -354,5 +396,8 @@ if __name__ == '__main__':
     parser.add_argument('--dataroot', default=None, type=str)
 
     args = parser.parse_args()
+    # register module
+    importlib.import_module('stp3.models.transformer')
+    importlib.import_module('mmdet.models.utils')
 
     eval(args.checkpoint, args.dataroot, args.debug_mode)

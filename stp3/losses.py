@@ -179,15 +179,17 @@ class ProbabilisticLoss(nn.Module):
         return kl_loss
 
 class Seg_edl_log_loss(nn.Module):
-    def __init__(self, class_weights, use_top_k, top_k_ratio, max_epochs, iters_per_epoch, coef=0.06):
+    def __init__(self, class_weights, use_top_k, top_k_ratio, max_epochs, iters_per_epoch, coef=0.06, num_classes=2, use_kl=True):
         super(Seg_edl_log_loss, self).__init__()
         self.max_epochs = max_epochs
+        self.num_classes = num_classes
         self.iters_per_epoch = iters_per_epoch
         self.coef = coef
-        # TODO: different class_weights for diff classes
         self.class_weights = class_weights
         self.use_top_k = use_top_k
         self.top_k_ratio = top_k_ratio
+        self.eps = 1e-10
+        self.use_kl = use_kl
 
     @staticmethod
     def kl_divergence(alpha, device=None):
@@ -208,6 +210,16 @@ class Seg_edl_log_loss(nn.Module):
         kl = first_term + second_term
         return kl
 
+    # cite: Evidential Deep Learning for Open Set Action Recognition
+    def euc(self, alpha, S, target, annealing_coef):
+        pred_scores, pred_cls = torch.max(alpha / S, 1, keepdim=True)
+        uncertainty = self.num_classes / S
+        acc_match = torch.eq(pred_cls, torch.argmax(target, 1, keepdim=True)).float()
+        acc_uncertain = - pred_scores * torch.log(1 - uncertainty + self.eps)
+        inacc_certain = - (1 - pred_scores) * torch.log(uncertainty + self.eps)
+        euc_loss = annealing_coef * acc_match * acc_uncertain + (1 - annealing_coef) * (1 - acc_match) * inacc_certain
+        return euc_loss
+
     def edl_loss(self, alpha, target, cur_iter, cur_epoch, class_weights):
         device=alpha.device
         S = torch.sum(alpha, dim=1, keepdim=True)
@@ -221,9 +233,11 @@ class Seg_edl_log_loss(nn.Module):
         annealing_coef = torch.min(torch.tensor(1.0, dtype=torch.float32),torch.tensor(numer / den, dtype=torch.float32)).to(device)
 
         kl_alpha = (alpha - 1) * (1 - target) + 1
-        kl_div = (torch.tensor([[self.coef]]).to(device)) * annealing_coef * Seg_edl_log_loss.kl_divergence(kl_alpha, device=device)
-
-        return A + kl_div
+        if self.use_kl:
+            ass_kl = (torch.tensor([[self.coef]]).to(device)) * annealing_coef * Seg_edl_log_loss.kl_divergence(kl_alpha, device=device)
+        else:
+            ass_kl = self.euc(alpha, S, target, annealing_coef)
+        return A + ass_kl
 
     def forward(self, predict, target, cur_iter, cur_epoch):
         b, s, c, h, w = predict.shape

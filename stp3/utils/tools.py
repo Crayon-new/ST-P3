@@ -20,7 +20,9 @@ import matplotlib.pyplot as plt
 from nuscenes.utils.data_classes import LidarPointCloud
 from nuscenes.utils.geometry_utils import transform_matrix
 from nuscenes.map_expansion.map_api import NuScenesMap
-
+import glob
+import logging
+import sys
 
 def get_lidar_data(nusc, sample_rec, nsweeps, min_distance):
     """
@@ -435,4 +437,30 @@ class KalmanFilter(nn.Module):
         K_T = torch.transpose(K, -1, -2)
         self.P.data = tmp @ self.P @ tmp_T + K @ self.R @ K_T
 
+def init_logging(filename=None, debug=False):
+    logging.root = logging.RootLogger('DEBUG' if debug else 'INFO')
+    formatter = logging.Formatter('[%(asctime)s][%(levelname)s] - %(message)s')
 
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.setFormatter(formatter)
+    logging.root.addHandler(stream_handler)
+
+    if filename is not None:
+        file_handler = logging.FileHandler(filename)
+        file_handler.setFormatter(formatter)
+        logging.root.addHandler(file_handler)
+
+
+def backup_code(save_dir, base_dir, verbose=False):
+    for pattern in ['*.py', 'stp3/*.py', 'stp3/models/*.py', 'stp3/datas/*.py',
+                    'stp3/layers/*.py', 'stp3/models/transformer/*.py', 'stp3/utils/*.py',
+                    'stp3/configs/carla/*.yml', 'stp3/configs/nuscenes/*.yml', 'stp3/configs/*.py']:
+        for file in glob.glob(pattern):
+            src = os.path.join(base_dir, file)
+            dst = os.path.join(save_dir, 'backup', os.path.dirname(file))
+
+            if verbose:
+                logging.info('Copying %s -> %s' % (os.path.relpath(src), os.path.relpath(dst)))
+
+            os.makedirs(dst, exist_ok=True)
+            shutil.copy2(src, dst)

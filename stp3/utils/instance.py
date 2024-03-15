@@ -273,8 +273,23 @@ def predict_instance_segmentation_and_trajectories(
         output, compute_matched_centers=False, make_consistent=True, vehicles_id=1,
 ):
     preds = output['segmentation'].detach()
-    preds = torch.argmax(preds, dim=2, keepdim=True)
+    if preds.size(2) >1:
+        preds = torch.argmax(preds, dim=2, keepdim=True)
     foreground_masks = preds.squeeze(2) == vehicles_id
+    if 'instance_flow' in output:
+        flow = output['instance_flow']
+    else:
+        flow = output['flow']
+    
+    if'instance_center' in output:
+        center = output['instance_center']
+    else:
+        center = output['centerness']
+    
+    if 'instance_offset' in output:
+        offset = output['instance_offset']
+    else:
+        offset = output['offset']
 
     batch_size, seq_len = preds.shape[:2]
     pred_inst = []
@@ -282,8 +297,8 @@ def predict_instance_segmentation_and_trajectories(
         pred_inst_batch = []
         for t in range(seq_len):
             pred_instance_t, _ = get_instance_segmentation_and_centers(
-                output['instance_center'][b, t].detach(),
-                output['instance_offset'][b, t].detach(),
+                center[b, t].detach(),
+                offset[b, t].detach(),
                 foreground_masks[b, t].detach()
             )
             pred_inst_batch.append(pred_instance_t)
@@ -292,14 +307,14 @@ def predict_instance_segmentation_and_trajectories(
     pred_inst = torch.stack(pred_inst).squeeze(2)
 
     if make_consistent:
-        if output['instance_flow'] is None:
+        if flow is None:
             print('Using zero flow because instance_future_output is None')
-            output['instance_flow'] = torch.zeros_like(output['instance_offset'])
+            flow = torch.zeros_like(offset)
         consistent_instance_seg = []
         for b in range(batch_size):
             consistent_instance_seg.append(
                 make_instance_id_temporally_consistent(pred_inst[b:b+1],
-                                                       output['instance_flow'][b:b+1].detach())
+                                                       flow[b:b+1].detach())
             )
         consistent_instance_seg = torch.cat(consistent_instance_seg, dim=0)
     else:

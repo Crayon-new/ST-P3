@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import matplotlib.pylab
 import matplotlib.pyplot as plt
+import cv2
 from stp3.utils.tools import gen_dx_bx
 
 
@@ -333,6 +334,27 @@ def convert_figure_numpy(figure):
     figure_np = np.frombuffer(figure.canvas.tostring_rgb(), dtype=np.uint8)
     figure_np = figure_np.reshape(figure.canvas.get_width_height()[::-1] + (3,))
     return figure_np
+
+def plot_prediction(consistent_instance_seg, matched_centers):
+    # Plot future trajectories
+    unique_ids = torch.unique(consistent_instance_seg[0, 0]).cpu().long().numpy()[1:]
+    instance_map = dict(zip(unique_ids, unique_ids))
+    instance_colours = generate_instance_colours(instance_map)
+    vis_image = plot_instance_map(consistent_instance_seg[0, 0].cpu().numpy(), instance_map)
+    trajectory_img = np.zeros(vis_image.shape, dtype=np.uint8)
+    for instance_id in unique_ids:
+        path = matched_centers[instance_id]
+        for t in range(len(path) - 1):
+            color = instance_colours[instance_id].tolist()
+            cv2.line(trajectory_img, tuple(map(int, path[t])), tuple(map(int, path[t + 1])),
+                     color, 4)
+
+    # Overlay arrows
+    temp_img = cv2.addWeighted(vis_image, 0.7, trajectory_img, 0.3, 1.0)
+    mask = ~ np.all(trajectory_img == 0, axis=2)
+    vis_image[mask] = temp_img[mask]
+
+    return vis_image
 
 def plot_planning(hd_map, traj, cfg):
     '''

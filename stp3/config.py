@@ -32,6 +32,7 @@ CN = CfgNode
 _C = CN()
 _C.LOG_DIR = 'tensorboard_logs'
 _C.TAG = 'default'
+_C.DEBUG = False
 
 _C.GPUS = [0]  # which gpus to use
 _C.PRECISION = 32  # 16bit or 32bit
@@ -181,6 +182,7 @@ _C.COST_FUNCTION.KLLoss_GAMMA = 1.0
 _C.COST_FUNCTION.UNCERTAINTY_WEIGHT = 0.5
 _C.COST_FUNCTION.KLLoss_GAMMA = 1.0
 _C.COST_FUNCTION.EDL_KL_COEF = 0.06
+_C.EDL_USE_KL = False
 
 def get_parser():
     parser = argparse.ArgumentParser(description='Fiery training')
