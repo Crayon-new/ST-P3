@@ -13,7 +13,9 @@ from stp3.utils.network import pack_sequence_dim, unpack_sequence_dim, set_bn_mo
 from stp3.utils.geometry import calculate_birds_eye_view_parameters, VoxelsSumming, pose_vec2mat
 from mmcv import Config
 from mmcv.cnn.bricks.transformer import build_transformer_layer_sequence
+from stp3.ops.bev_pool import QuickCumsumCuda
 
+import time
 
 class STP3(nn.Module):
     def __init__(self, cfg):
@@ -244,7 +246,10 @@ class STP3(nn.Module):
         future_egomotion_mat = pose_vec2mat(future_egomotion)  # (3,3,4,4)
         rotation, translation = future_egomotion_mat[..., :3, :3], future_egomotion_mat[..., :3, 3]
 
-        def voxel_to_pixel(geometry_b, x_b):
+        def voxel_to_pixel(geometry_b, x_b, batch, d, h, w):
+            batch_ix = torch.cat([torch.full([geometry_b.size(0)//batch, 1], ix,
+                             device=x_b.device, dtype=torch.long) for ix in range(batch)])
+            geometry_b = torch.cat((geometry_b, batch_ix), 1)
             # Mask out points that are outside the considered spatial extent.
             mask = (
                     (geometry_b[:, 0] >= 0)
@@ -267,8 +272,10 @@ class STP3(nn.Module):
             x_b, geometry_b, ranks = x_b[ranks_indices], geometry_b[ranks_indices], ranks[ranks_indices]
 
             # Project to bird's-eye view by summing voxels.
-            x_b, geometry_b = VoxelsSumming.apply(x_b, geometry_b, ranks)
-            return geometry_b, x_b
+            x = QuickCumsumCuda.apply(x_b, geometry_b, ranks, batch, self.bev_dimension[2], self.bev_dimension[0], self.bev_dimension[1])
+            x = x.contiguous().squeeze(1)
+
+            return x
 
         # Number of 3D points
         N = n * d * h * w
@@ -297,11 +304,7 @@ class STP3(nn.Module):
                 geometry_b = (
                         (flow_geo[t] - (self.bev_start_position - self.bev_resolution / 2.0)) / self.bev_resolution)
                 geometry_b = geometry_b.view(N, 3).long()
-                geometry_b, x_b = voxel_to_pixel(geometry_b, x_b)
-
-                tmp_bev_feature = torch.zeros((self.bev_dimension[2], self.bev_dimension[0], self.bev_dimension[1], c),
-                                              device=flow_b.device)
-                tmp_bev_feature[geometry_b[:, 2], geometry_b[:, 0], geometry_b[:, 1]] = x_b
+                tmp_bev_feature = voxel_to_pixel(geometry_b, x_b, 1, d, h, w)
 
                 bev_feature = bev_feature * self.discount + tmp_bev_feature
                 tmp_bev_feature = bev_feature.permute((0, 3, 1, 2))
@@ -323,7 +326,6 @@ class STP3(nn.Module):
         geometry = unpack_sequence_dim(geometry, b, s)
         depth = unpack_sequence_dim(depth, b, s)
         cam_front = unpack_sequence_dim(cam_front, b, s)[:,-1] if cam_front is not None else None
-
         x = self.projection_to_birds_eye_view(x, geometry, future_egomotion)
         return x, depth, cam_front
 
