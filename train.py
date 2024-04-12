@@ -5,6 +5,7 @@ import torch
 import pytorch_lightning as pl
 from pytorch_lightning.plugins import DDPPlugin
 from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.utilities import rank_zero_only
 
 from stp3.config import get_parser, get_cfg
 from stp3.datas.dataloaders import prepare_dataloaders
@@ -13,6 +14,12 @@ from stp3.utils.tools import init_logging, backup_code
 import importlib
 import logging
 
+@rank_zero_only
+def prepare_text_log(save_dir, cfg):
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    backup_code(save_dir, base_dir)
+    # init logger
+    init_logging(os.path.join(save_dir, 'text.log'), cfg.DEBUG)
 
 def main():
     args = get_parser().parse_args()
@@ -40,11 +47,7 @@ def main():
         cfg.LOG_DIR, time.strftime('%d%B%Yat%H_%M_%S%Z') + '_' + socket.gethostname() + '_' + cfg.TAG
     )
     os.makedirs(save_dir, exist_ok=True)
-
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    backup_code(save_dir, base_dir)
-    # init logger
-    init_logging(os.path.join(save_dir, 'text.log'), cfg.DEBUG)
+    prepare_text_log(save_dir, cfg)
     tb_logger = pl.loggers.TensorBoardLogger(save_dir=save_dir)
     # csv_logger = pl.loggers.CSVLogger(save_dir=save_dir, name='my_model')
 
