@@ -14,7 +14,7 @@ point_cloud_range = [-51.2, -51.2, -5.0, 51.2, 51.2, 3.0]
 
 decoder = dict(
     type='FutureDecoder',
-    num_layers=6,
+    num_layers=2,
     pc_range=point_cloud_range,
     num_points_in_pillar=4,
     return_intermediate=False,

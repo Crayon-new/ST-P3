@@ -51,6 +51,17 @@ class STP3(nn.Module):
         # Encoder
         self.encoder = Encoder(cfg=self.cfg.MODEL.ENCODER, D=self.depth_channels)
 
+        self.dist_feat = True
+        if self.dist_feat:
+            self.mean_conv = nn.Sequential(
+                                            nn.Conv2d(self.encoder_out_channels, self.encoder_out_channels, 1),
+                                            nn.BatchNorm2d(self.encoder_out_channels)
+                                        )
+            self.sigma_conv = nn.Sequential(
+                                            nn.Conv2d(self.encoder_out_channels, self.encoder_out_channels, 1),
+                                            nn.BatchNorm2d(self.encoder_out_channels)
+                                        )
+
         # Temporal model
         temporal_in_channels = self.encoder_out_channels
         if self.cfg.MODEL.TEMPORAL_MODEL.INPUT_EGOPOSE:
@@ -73,26 +84,26 @@ class STP3(nn.Module):
         self.future_pred_in_channels = self.temporal_model.out_channels
         if self.n_future > 0:
             # probabilistic sampling unused
-            # if self.cfg.PROBABILISTIC.ENABLED:
-            #     # Distribution networks
-            #     self.present_distribution = DistributionModule(
-            #         self.future_pred_in_channels,
-            #         self.latent_dim,
-            #         method=self.cfg.PROBABILISTIC.METHOD
-            #     )
+            if self.cfg.PROBABILISTIC.ENABLED:
+                # Distribution networks
+                self.present_distribution = DistributionModule(
+                    self.future_pred_in_channels,
+                    self.latent_dim,
+                    method=self.cfg.PROBABILISTIC.METHOD
+                )
 
             # # Future prediction unused
-            # self.future_prediction = FuturePrediction(
-            #     in_channels=self.future_pred_in_channels,
-            #     latent_dim=self.latent_dim,
-            #     n_future=self.n_future,
-            #     mixture=self.cfg.MODEL.FUTURE_PRED.MIXTURE,
-            #     n_gru_blocks=self.cfg.MODEL.FUTURE_PRED.N_GRU_BLOCKS,
-            #     n_res_layers=self.cfg.MODEL.FUTURE_PRED.N_RES_LAYERS,
-            # )
+            self.future_prediction = FuturePrediction(
+                in_channels=self.future_pred_in_channels,
+                latent_dim=self.latent_dim,
+                n_future=self.n_future,
+                mixture=self.cfg.MODEL.FUTURE_PRED.MIXTURE,
+                n_gru_blocks=self.cfg.MODEL.FUTURE_PRED.N_GRU_BLOCKS,
+                n_res_layers=self.cfg.MODEL.FUTURE_PRED.N_RES_LAYERS,
+            )
 
-            self.transformer_decoder_cfg = Config.fromfile(self.cfg.TRANSFORMER_CONFIG_PATH)
-            self.transformer_decoder = build_transformer_layer_sequence(self.transformer_decoder_cfg.decoder)
+            # self.transformer_decoder_cfg = Config.fromfile(self.cfg.TRANSFORMER_CONFIG_PATH)
+            # self.transformer_decoder = build_transformer_layer_sequence(self.transformer_decoder_cfg.decoder)
             # self.transformer_decoder.init_weights()
 
         # Decoder
@@ -148,8 +159,8 @@ class STP3(nn.Module):
         future_egomotion = future_egomotion[:, :self.receptive_field].contiguous() #(2, 3, 6)
 
         # Lifting features and project to bird's-eye view
-        x, depth, cam_front = self.calculate_birds_eye_view_features(image, intrinsics, extrinsics, future_egomotion) # (3,3,64,200,200)
-        output = {**output, 'depth_prediction': depth, 'cam_front':cam_front}
+        x, depth, cam_front, projected_depth_unc = self.calculate_birds_eye_view_features(image, intrinsics, extrinsics, future_egomotion) # (3,3,64,200,200)
+        output = {**output, 'depth_prediction': depth, 'cam_front':cam_front, 'depth_unc': projected_depth_unc}
 
         if self.cfg.MODEL.TEMPORAL_MODEL.INPUT_EGOPOSE:
             b, s, c = future_egomotion.shape
@@ -163,26 +174,29 @@ class STP3(nn.Module):
         #  Temporal model
         states = self.temporal_model(x)
 
-        if self.n_future > 0:
-            future_states = self.transformer_decoder(states, self.cfg.TIME_RECEPTIVE_FIELD, self.cfg.N_FUTURE_FRAMES)
-            states = torch.cat([states, future_states], 1)
+        if self.dist_feat:
+            mean_states, sigma_states, states = self.distribution_forward_2(states)
 
-            # present_state = states[:, -1:].contiguous()
-            #
-            # b, _, c, h, w = present_state.shape
-            #
-            # if self.cfg.PROBABILISTIC.ENABLED:
-            #     sample = self.distribution_forward(
-            #         present_state,
-            #         min_log_sigma=self.cfg.MODEL.DISTRIBUTION.MIN_LOG_SIGMA,
-            #         max_log_sigma=self.cfg.MODEL.DISTRIBUTION.MAX_LOG_SIGMA,
-            #     )
-            #     future_prediction_input = sample
-            # else:
-            #     future_prediction_input = present_state.new_zeros(b, 1, self.latent_dim, h, w)
-            #
-            # # predict the future
-            # states = self.future_prediction(future_prediction_input, states) #(2, 9, 64, 200, 200)
+        if self.n_future > 0:
+            # future_states = self.transformer_decoder(states, self.cfg.TIME_RECEPTIVE_FIELD, self.cfg.N_FUTURE_FRAMES)
+            # states = torch.cat([states, future_states], 1)
+
+            present_state = states[:, -1:].contiguous()
+            
+            b, _, c, h, w = present_state.shape
+            
+            if self.cfg.PROBABILISTIC.ENABLED:
+                sample = self.distribution_forward(
+                    present_state,
+                    min_log_sigma=self.cfg.MODEL.DISTRIBUTION.MIN_LOG_SIGMA,
+                    max_log_sigma=self.cfg.MODEL.DISTRIBUTION.MAX_LOG_SIGMA,
+                )
+                future_prediction_input = sample
+            else:
+                future_prediction_input = present_state.new_zeros(b, 1, self.latent_dim, h, w)
+            
+            # predict the future
+            states = self.future_prediction(future_prediction_input, states) #(2, 9, 64, 200, 200)
 
             # predict BEV outputs
             bev_output = self.decoder(states)
@@ -190,8 +204,11 @@ class STP3(nn.Module):
         else:
             # Perceive BEV outputs
             bev_output = self.decoder(states)
-
-        output = {**output, **bev_output}
+        
+        if self.dist_feat:
+            output = {**output, **bev_output, "mean_states": mean_states, "sigma_states": sigma_states}
+        else:
+            output = {**output, **bev_output}
 
         return output
 
@@ -207,6 +224,24 @@ class STP3(nn.Module):
         points = torch.cat((points[:, :, :, :, :, :2] * points[:, :, :, :, :, 2:3], points[:, :, :, :, :, 2:3]), 5)
         combined_transformation = rotation.matmul(torch.inverse(intrinsics))
         points = combined_transformation.view(B, N, 1, 1, 1, 3, 3).matmul(points).squeeze(-1)
+        points += translation.view(B, N, 1, 1, 1, 3)
+
+        # The 3 dimensions in the ego reference frame are: (forward, sides, height)
+        return points
+
+    def get_geometry2(self, img2lidar):
+        img2lidar = lidar2img.T
+        rotation = img2lidar[..., :3, :3]
+        translation = img2lidar[..., :3, 3]
+
+        B, N, _ = translation.shape
+        # Add batch, camera dimension, and a dummy dimension at the end
+        points = self.frustum.unsqueeze(0).unsqueeze(0).unsqueeze(-1)
+
+        # Camera to ego reference frame
+        points = torch.cat((points[:, :, :, :, :, :2] * points[:, :, :, :, :, 2:3], points[:, :, :, :, :, 2:3]), 5)
+
+        points = rotation.view(B, N, 1, 1, 1, 3, 3).matmul(points).squeeze(-1)
         points += translation.view(B, N, 1, 1, 1, 3)
 
         # The 3 dimensions in the ego reference frame are: (forward, sides, height)
@@ -327,7 +362,25 @@ class STP3(nn.Module):
         depth = unpack_sequence_dim(depth, b, s)
         cam_front = unpack_sequence_dim(cam_front, b, s)[:,-1] if cam_front is not None else None
         x = self.projection_to_birds_eye_view(x, geometry, future_egomotion)
-        return x, depth, cam_front
+
+        depth_entropy = self.calculate_depth_entropy(depth)
+        self.discount = 0
+        projected_depth_unc = self.projection_to_birds_eye_view(depth_entropy, geometry, future_egomotion).squeeze(2)
+
+        # projected_depth_unc = F.max_pool2d(projected_depth_unc, kernel_size=3, stride=1, padding=1)
+
+        # # 使用双线性插值去除NaN值
+        # projected_depth_unc = F.interpolate(projected_depth_unc, size=(200, 200), mode='bilinear', align_corners=True)
+        # projected_depth_unc = torch.nan_to_num(projected_depth_unc, nan=0.0) # 将NaN值替换为0
+
+        self.discount = self.cfg.LIFT.DISCOUNT
+
+        return x, depth, cam_front, projected_depth_unc
+
+    def calculate_depth_entropy(self, depth):
+        depth_entropy = -1 * depth * torch.log(depth + 1e-12)
+        depth_entropy = torch.sum(depth_entropy, dim=3, keepdim=True).expand_as(depth).unsqueeze(-1)
+        return depth_entropy
 
     def distribution_forward(self, present_features, min_log_sigma, max_log_sigma):
         """
@@ -392,6 +445,24 @@ class STP3(nn.Module):
             raise NotImplementedError
 
         return sample
+    
+    def sample_with_uncertainty(self, mean_states, sigma_states):
+        if self.training:
+            sample_states = mean_states + sigma_states.mul(0.5).exp_() * torch.randn_like(mean_states)
+        else:
+            sample_states = mean_states
+        # sample_states = sample_states.view(b, n, *sample_states.shape[1:])
+        return sample_states
+
+    def distribution_forward_2(self, states):
+        b, n, c, h, w = states.shape
+        states = states.view(b * n, c, h, w)
+        mean_states = self.mean_conv(states)
+        sigma_states = torch.clamp(self.sigma_conv(states), -7, 7)
+        sample_states = mean_states + sigma_states.mul(0.5).exp_() * torch.randn_like(mean_states)
+        sample_states = sample_states.view(b, n, *sample_states.shape[1:])
+        return mean_states, sigma_states, sample_states
+
 
     def select_best_traj(self, trajs, cost_volume, lane_divider, semantic_pred, k=1):
         '''
