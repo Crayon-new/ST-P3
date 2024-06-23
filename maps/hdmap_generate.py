@@ -97,19 +97,19 @@ def world_to_pixel(location, world_offset, projective=False):
 	return p
 
 Town2map = {
-	"town01": "Town01.h5",
-	"town02": "Town02.h5",
-	"town03": "Town03.h5",
-	"town04": "Town04.h5",
-	"town05": "Town05.h5",
-	"town06": "Town06.h5",
-	"town07": "Town07.h5",
-	"town10": "Town10HD.h5",
+	"Town01": "Town01.h5",
+	"Town02": "Town02.h5",
+	"Town03": "Town03.h5",
+	"Town04": "Town04.h5",
+	"Town05": "Town05.h5",
+	"Town06": "Town06.h5",
+	"Town07": "Town07.h5",
+	"Town10": "Town10HD.h5",
 	
 }
 
-root = ""
-map_path = ""
+root = "/home2/huangzj/github_respo/ST-P3/data/carla"
+map_path = "/home2/huangzj/github_respo/ST-P3/maps"
 town_list = list(os.listdir(root))
 # town_list = town_list[18:]
 # town_list = ["town02_short","town02_tiny"]
@@ -132,7 +132,7 @@ for town in tqdm.tqdm(town_list):
 	for route in tqdm.tqdm(route_list):
 		route_folder = os.path.join(town_folder, route)
 		os.makedirs(os.path.join(route_folder, "hdmap"), exist_ok=True)
-		measurement_folder = os.path.join(route_folder, "meta")
+		measurement_folder = os.path.join(route_folder, "measurements")
 		measurement_files = os.listdir(measurement_folder)
 		for measurement in measurement_files:
 			with open(os.path.join(measurement_folder, measurement), "r") as read_file:

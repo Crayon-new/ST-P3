@@ -16,6 +16,7 @@ import logging
 
 @rank_zero_only
 def prepare_text_log(save_dir, cfg):
+    os.makedirs(save_dir, exist_ok=True)
     base_dir = os.path.dirname(os.path.abspath(__file__))
     backup_code(save_dir, base_dir)
     # init logger
@@ -46,7 +47,6 @@ def main():
     save_dir = os.path.join(
         cfg.LOG_DIR, time.strftime('%d%B%Yat%H_%M_%S%Z') + '_' + socket.gethostname() + '_' + cfg.TAG
     )
-    os.makedirs(save_dir, exist_ok=True)
     prepare_text_log(save_dir, cfg)
     tb_logger = pl.loggers.TensorBoardLogger(save_dir=save_dir)
     # csv_logger = pl.loggers.CSVLogger(save_dir=save_dir, name='my_model')

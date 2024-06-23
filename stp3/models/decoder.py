@@ -3,6 +3,7 @@ import torch.nn as nn
 from torchvision.models.resnet import resnet18
 
 from stp3.layers.convolutions import UpsamplingAdd, DeepLabHead
+from stp3.models.feature_distribution import feature_distribution
 
 
 class Decoder(nn.Module):
@@ -33,6 +34,8 @@ class Decoder(nn.Module):
         self.up3_skip = UpsamplingAdd(256, 128, scale_factor=2)
         self.up2_skip = UpsamplingAdd(128, 64, scale_factor=2)
         self.up1_skip = UpsamplingAdd(64, shared_out_channels, scale_factor=2)
+
+        self.feature_distribution = feature_distribution(2, 2)
 
         self.segmentation_head = nn.Sequential(
             nn.Conv2d(shared_out_channels, shared_out_channels, kernel_size=3, padding=1, bias=False),
@@ -117,7 +120,8 @@ class Decoder(nn.Module):
         # Third upsample to (H, W)
         x = self.up1_skip(x, skip_x['1'])
 
-        segmentation_output = self.segmentation_head(x)
+        segmentation_output = torch.clamp(self.segmentation_head(x), -6, 6)
+        mean_states, sigma_states, segmentation_output = self.feature_distribution(segmentation_output)
         pedestrian_output = self.pedestrian_head(x) if self.predict_pedestrian else None
         hdmap_output = self.hdmap_head(x.view(b, s, *x.shape[1:])[:,self.n_present-1]) if self.perceive_hdmap else None
         instance_center_output = self.instance_center_head(x) if self.predict_instance else None
@@ -126,6 +130,8 @@ class Decoder(nn.Module):
         costvolume = self.costvolume_head(x).squeeze(1) if self.planning else None
         return {
             'segmentation': segmentation_output.view(b, s, *segmentation_output.shape[1:]),
+            'mean_states': mean_states,
+            'sigma_states': sigma_states,
             'pedestrian': pedestrian_output.view(b, s, *pedestrian_output.shape[1:])
             if pedestrian_output is not None else None,
             'hdmap' : hdmap_output,

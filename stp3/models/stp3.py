@@ -52,15 +52,15 @@ class STP3(nn.Module):
         self.encoder = Encoder(cfg=self.cfg.MODEL.ENCODER, D=self.depth_channels)
 
         self.dist_feat = True
-        if self.dist_feat:
-            self.mean_conv = nn.Sequential(
-                                            nn.Conv2d(self.encoder_out_channels, self.encoder_out_channels, 1),
-                                            nn.BatchNorm2d(self.encoder_out_channels)
-                                        )
-            self.sigma_conv = nn.Sequential(
-                                            nn.Conv2d(self.encoder_out_channels, self.encoder_out_channels, 1),
-                                            nn.BatchNorm2d(self.encoder_out_channels)
-                                        )
+        # if self.dist_feat:
+        #     self.mean_conv = nn.Sequential(
+        #                                     nn.Conv2d(self.encoder_out_channels, self.encoder_out_channels, 1),
+        #                                     nn.BatchNorm2d(self.encoder_out_channels)
+        #                                 )
+        #     self.sigma_conv = nn.Sequential(
+        #                                     nn.Conv2d(self.encoder_out_channels, self.encoder_out_channels, 1),
+        #                                     nn.BatchNorm2d(self.encoder_out_channels)
+        #                                 )
 
         # Temporal model
         temporal_in_channels = self.encoder_out_channels
@@ -174,8 +174,10 @@ class STP3(nn.Module):
         #  Temporal model
         states = self.temporal_model(x)
 
-        if self.dist_feat:
-            mean_states, sigma_states, states = self.distribution_forward_2(states)
+        # if self.dist_feat:
+        #     mean_states, sigma_states, states = self.distribution_forward_2(states)
+            # print(sigma_states.mean())
+            # np.save("/home2/huangzj/github_respo/ST-P3/imgs/sigma.npy", sigma_states.detach().cpu().numpy())
 
         if self.n_future > 0:
             # future_states = self.transformer_decoder(states, self.cfg.TIME_RECEPTIVE_FIELD, self.cfg.N_FUTURE_FRAMES)
@@ -204,11 +206,8 @@ class STP3(nn.Module):
         else:
             # Perceive BEV outputs
             bev_output = self.decoder(states)
-        
-        if self.dist_feat:
-            output = {**output, **bev_output, "mean_states": mean_states, "sigma_states": sigma_states}
-        else:
-            output = {**output, **bev_output}
+
+        output = {**output, **bev_output}
 
         return output
 
