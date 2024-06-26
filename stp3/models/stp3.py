@@ -8,6 +8,7 @@ from stp3.models.temporal_model import TemporalModelIdentity, TemporalModel
 from stp3.models.distributions import DistributionModule
 from stp3.models.future_prediction import FuturePrediction
 from stp3.models.decoder import Decoder
+from stp3.models.simple_decoder import Simple_Decoder
 from stp3.models.planning_model import Planning
 from stp3.utils.network import pack_sequence_dim, unpack_sequence_dim, set_bn_momentum
 from stp3.utils.geometry import calculate_birds_eye_view_parameters, VoxelsSumming, pose_vec2mat
@@ -107,7 +108,8 @@ class STP3(nn.Module):
             # self.transformer_decoder.init_weights()
 
         # Decoder
-        self.decoder = Decoder(
+        # self.decoder = Decoder(
+        self.decoder = Simple_Decoder(
             in_channels=self.future_pred_in_channels,
             n_classes=len(self.cfg.SEMANTIC_SEG.VEHICLE.WEIGHTS),
             n_present=self.receptive_field,
