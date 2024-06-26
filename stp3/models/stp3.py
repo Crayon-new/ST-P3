@@ -208,6 +208,7 @@ class STP3(nn.Module):
             bev_output = self.decoder(states)
 
         output = {**output, **bev_output}
+        _, output['UQ'] = self.sample_with_uncertainty(output['mean_states'], output['sigma_states'], 100)
 
         return output
 
@@ -228,7 +229,7 @@ class STP3(nn.Module):
         # The 3 dimensions in the ego reference frame are: (forward, sides, height)
         return points
 
-    def get_geometry2(self, img2lidar):
+    def get_geometry2(self, lidar2img):
         img2lidar = lidar2img.T
         rotation = img2lidar[..., :3, :3]
         translation = img2lidar[..., :3, 3]
@@ -444,14 +445,21 @@ class STP3(nn.Module):
             raise NotImplementedError
 
         return sample
-    
-    def sample_with_uncertainty(self, mean_states, sigma_states):
+
+    def sample_with_uncertainty(self, mean_states, sigma_states, sample_num):
         if self.training:
             sample_states = mean_states + sigma_states.mul(0.5).exp_() * torch.randn_like(mean_states)
         else:
-            sample_states = mean_states
-        # sample_states = sample_states.view(b, n, *sample_states.shape[1:])
-        return sample_states
+            for i in range(sample_num):
+                sample = mean_states + sigma_states.mul(0.5).exp_() * torch.randn_like(mean_states)
+                soft_max_sample = F.softmax(sample, dim=1)
+                soft_max_sample = soft_max_sample[:, 1:]
+                if i == 0:
+                    sample_states = soft_max_sample
+                else:
+                    sample_states = torch.cat([sample_states, soft_max_sample], dim=1)
+        var = torch.var(sample_states, dim=1, keepdim=True)
+        return sample_states, var
 
     def distribution_forward_2(self, states):
         b, n, c, h, w = states.shape
