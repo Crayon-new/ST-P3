@@ -145,7 +145,7 @@ class TrainingModule(pl.LightningModule):
             loss['segmentation_uncertainty'] = 0.5 * self.model.segmentation_weight
 
             # KL loss
-            seg_pred = output['segmentation']
+            seg_pred = output['proposal_segmentation']
             seg_pred = seg_pred[:,:self.model.receptive_field]
 
             softmax_2 = nn.Softmax(dim=2)
@@ -245,7 +245,7 @@ class TrainingModule(pl.LightningModule):
             n_present = self.model.receptive_field
 
             # semantic segmentation metric
-            seg_prediction = output['segmentation'].detach()
+            seg_prediction = output['proposal_segmentation'].detach()
             seg_prediction = torch.argmax(seg_prediction, dim=2, keepdim=True)
             self.metric_vehicle_val(seg_prediction[:, n_present - 1:], labels['segmentation'][:, n_present - 1:])
 
@@ -295,7 +295,7 @@ class TrainingModule(pl.LightningModule):
             else:
                 output = {**output, 'selected_traj': labels['gt_trajectory']}
         
-        output['segmentation'], output['seg_uncertainty'] = convert_belief_to_output_and_uncertainty(output['segmentation'])
+        # output['segmentation'], output['seg_uncertainty'] = convert_belief_to_output_and_uncertainty(output['segmentation'])
         return output, labels, loss
 
     def prepare_future_labels(self, batch):
