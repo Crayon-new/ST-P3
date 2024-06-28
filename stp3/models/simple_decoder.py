@@ -91,7 +91,7 @@ class Simple_Decoder(nn.Module):
         instance_future_output = self.instance_future_head(x) if self.predict_future_flow else None
         costvolume = self.costvolume_head(x).squeeze(1) if self.planning else None
         return {
-            'segmentation': segmentation_output.view(b, s, *segmentation_output.shape[1:]),
+            'proposal_segmentation': segmentation_output.view(b, s, *segmentation_output.shape[1:]),
             'mean_states': mean_states,
             'sigma_states': sigma_states,
             'pedestrian': pedestrian_output.view(b, s, *pedestrian_output.shape[1:])

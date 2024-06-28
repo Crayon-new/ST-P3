@@ -139,8 +139,8 @@ class TrainingModule(pl.LightningModule):
         if is_train:
             # segmentation
             segmentation_factor = 1 / (2 * torch.exp(self.model.segmentation_weight))
-            loss['segmentation'] = segmentation_factor * self.losses_fn['segmentation'](
-                output['segmentation'], labels['segmentation'], self.model.receptive_field
+            loss['proposal_segmentation'] = segmentation_factor * self.losses_fn['segmentation'](
+                output['proposal_segmentation'], labels['segmentation'], self.model.receptive_field
             )
             loss['segmentation_uncertainty'] = 0.5 * self.model.segmentation_weight
 

@@ -84,32 +84,46 @@ class STP3(nn.Module):
 
         self.future_pred_in_channels = self.temporal_model.out_channels
         if self.n_future > 0:
-            # probabilistic sampling unused
-            if self.cfg.PROBABILISTIC.ENABLED:
-                # Distribution networks
-                self.present_distribution = DistributionModule(
-                    self.future_pred_in_channels,
-                    self.latent_dim,
-                    method=self.cfg.PROBABILISTIC.METHOD
-                )
+            # # probabilistic sampling unused
+            # if self.cfg.PROBABILISTIC.ENABLED:
+            #     # Distribution networks
+            #     self.present_distribution = DistributionModule(
+            #         self.future_pred_in_channels,
+            #         self.latent_dim,
+            #         method=self.cfg.PROBABILISTIC.METHOD
+            #     )
 
-            # # Future prediction unused
-            self.future_prediction = FuturePrediction(
+            # # # Future prediction unused
+            # self.future_prediction = FuturePrediction(
+            #     in_channels=self.future_pred_in_channels,
+            #     latent_dim=self.latent_dim,
+            #     n_future=self.n_future,
+            #     mixture=self.cfg.MODEL.FUTURE_PRED.MIXTURE,
+            #     n_gru_blocks=self.cfg.MODEL.FUTURE_PRED.N_GRU_BLOCKS,
+            #     n_res_layers=self.cfg.MODEL.FUTURE_PRED.N_RES_LAYERS,
+            # )
+
+            self.transformer_decoder_cfg = Config.fromfile(self.cfg.TRANSFORMER_CONFIG_PATH)
+            self.transformer_decoder = build_transformer_layer_sequence(self.transformer_decoder_cfg.decoder)
+            self.transformer_decoder.init_weights()
+
+            self.decoder = Decoder(
                 in_channels=self.future_pred_in_channels,
-                latent_dim=self.latent_dim,
-                n_future=self.n_future,
-                mixture=self.cfg.MODEL.FUTURE_PRED.MIXTURE,
-                n_gru_blocks=self.cfg.MODEL.FUTURE_PRED.N_GRU_BLOCKS,
-                n_res_layers=self.cfg.MODEL.FUTURE_PRED.N_RES_LAYERS,
+                n_classes=len(self.cfg.SEMANTIC_SEG.VEHICLE.WEIGHTS),
+                n_present=self.receptive_field,
+                n_hdmap=len(self.cfg.SEMANTIC_SEG.HDMAP.ELEMENTS),
+                predict_gate = {
+                    'perceive_hdmap': self.cfg.SEMANTIC_SEG.HDMAP.ENABLED,
+                    'predict_pedestrian': self.cfg.SEMANTIC_SEG.PEDESTRIAN.ENABLED,
+                    'predict_instance': self.cfg.INSTANCE_SEG.ENABLED,
+                    'predict_future_flow': self.cfg.INSTANCE_FLOW.ENABLED,
+                    'planning': self.cfg.PLANNING.ENABLED,
+                }
             )
-
-            # self.transformer_decoder_cfg = Config.fromfile(self.cfg.TRANSFORMER_CONFIG_PATH)
-            # self.transformer_decoder = build_transformer_layer_sequence(self.transformer_decoder_cfg.decoder)
-            # self.transformer_decoder.init_weights()
 
         # Decoder
         # self.decoder = Decoder(
-        self.decoder = Simple_Decoder(
+        self.simple_decoder = Simple_Decoder(
             in_channels=self.future_pred_in_channels,
             n_classes=len(self.cfg.SEMANTIC_SEG.VEHICLE.WEIGHTS),
             n_present=self.receptive_field,
@@ -182,35 +196,36 @@ class STP3(nn.Module):
             # np.save("/home2/huangzj/github_respo/ST-P3/imgs/sigma.npy", sigma_states.detach().cpu().numpy())
 
         if self.n_future > 0:
-            # future_states = self.transformer_decoder(states, self.cfg.TIME_RECEPTIVE_FIELD, self.cfg.N_FUTURE_FRAMES)
-            # states = torch.cat([states, future_states], 1)
+            proposal_output = self.simple_decoder(states)
+            future_states = self.transformer_decoder(states, self.cfg.TIME_RECEPTIVE_FIELD, self.cfg.N_FUTURE_FRAMES)
+            states = torch.cat([states, future_states], 1)
 
-            present_state = states[:, -1:].contiguous()
+            # present_state = states[:, -1:].contiguous()
             
-            b, _, c, h, w = present_state.shape
+            # b, _, c, h, w = present_state.shape
             
-            if self.cfg.PROBABILISTIC.ENABLED:
-                sample = self.distribution_forward(
-                    present_state,
-                    min_log_sigma=self.cfg.MODEL.DISTRIBUTION.MIN_LOG_SIGMA,
-                    max_log_sigma=self.cfg.MODEL.DISTRIBUTION.MAX_LOG_SIGMA,
-                )
-                future_prediction_input = sample
-            else:
-                future_prediction_input = present_state.new_zeros(b, 1, self.latent_dim, h, w)
+            # if self.cfg.PROBABILISTIC.ENABLED:
+            #     sample = self.distribution_forward(
+            #         present_state,
+            #         min_log_sigma=self.cfg.MODEL.DISTRIBUTION.MIN_LOG_SIGMA,
+            #         max_log_sigma=self.cfg.MODEL.DISTRIBUTION.MAX_LOG_SIGMA,
+            #     )
+            #     future_prediction_input = sample
+            # else:
+            #     future_prediction_input = present_state.new_zeros(b, 1, self.latent_dim, h, w)
             
-            # predict the future
-            states = self.future_prediction(future_prediction_input, states) #(2, 9, 64, 200, 200)
+            # # predict the future
+            # states = self.future_prediction(future_prediction_input, states) #(2, 9, 64, 200, 200)
 
             # predict BEV outputs
             bev_output = self.decoder(states)
 
         else:
             # Perceive BEV outputs
-            bev_output = self.decoder(states)
+            bev_output = self.simple_decoder(states)
 
         output = {**output, **bev_output}
-        _, output['UQ'] = self.sample_with_uncertainty(output['mean_states'], output['sigma_states'], 100)
+        # _, output['UQ'] = self.sample_with_uncertainty(output['mean_states'], output['sigma_states'], 100)
 
         return output
 
