@@ -45,17 +45,17 @@ class TrainingModule(pl.LightningModule):
         self.model.segmentation_weight = nn.Parameter(torch.tensor(0.0), requires_grad=True)
         self.metric_vehicle_val = IntersectionOverUnion(self.n_classes)
 
-        # self.losses_fn['segmentation_edl'] = Seg_edl_log_loss(
-        #     class_weights=torch.Tensor(self.cfg.SEMANTIC_SEG.VEHICLE.WEIGHTS),
-        #     use_top_k=self.cfg.SEMANTIC_SEG.VEHICLE.USE_TOP_K,
-        #     top_k_ratio=self.cfg.SEMANTIC_SEG.VEHICLE.TOP_K_RATIO,
-        #     max_epochs=self.cfg.EPOCHS,
-        #     iters_per_epoch=self.cfg.ITERS_PER_EPOCH,
-        #     coef=self.cfg.COST_FUNCTION.EDL_KL_COEF,
-        #     use_kl=self.cfg.EDL_USE_KL
-        # )
+        self.losses_fn['segmentation_edl'] = Seg_edl_log_loss(
+            class_weights=torch.Tensor(self.cfg.SEMANTIC_SEG.VEHICLE.WEIGHTS),
+            use_top_k=self.cfg.SEMANTIC_SEG.VEHICLE.USE_TOP_K,
+            top_k_ratio=self.cfg.SEMANTIC_SEG.VEHICLE.TOP_K_RATIO,
+            max_epochs=self.cfg.EPOCHS,
+            iters_per_epoch=self.cfg.ITERS_PER_EPOCH,
+            coef=self.cfg.COST_FUNCTION.EDL_KL_COEF,
+            use_kl=self.cfg.EDL_USE_KL
+        )
 
-        # self.model.segmentation_edl_weight = nn.Parameter(torch.tensor(0.0), requires_grad=True)
+        self.model.segmentation_edl_weight = nn.Parameter(torch.tensor(0.0), requires_grad=True)
 
 
         # Pedestrian segmentation
@@ -140,7 +140,7 @@ class TrainingModule(pl.LightningModule):
             # segmentation
             segmentation_factor = 1 / (2 * torch.exp(self.model.segmentation_weight))
             loss['proposal_segmentation'] = segmentation_factor * self.losses_fn['segmentation'](
-                output['proposal_segmentation'], labels['segmentation'], self.model.receptive_field
+                output['proposal_segmentation'], labels['segmentation'][:, :self.model.receptive_field], self.model.receptive_field
             )
             loss['segmentation_uncertainty'] = 0.5 * self.model.segmentation_weight
 
@@ -165,14 +165,13 @@ class TrainingModule(pl.LightningModule):
 
             loss['KL_loss'] = (torch.pow((1-seg_pred), self.cfg.COST_FUNCTION.KLLoss_GAMMA)*loss['KL_loss']).mean() * self.cfg.COST_FUNCTION.KLLoss_WEIGHT
 
-
-            # # segmentation edl
-            # segmentation_edl_factor = 1 / (2 * torch.exp(self.model.segmentation_edl_weight))
-            # loss['segmentation_edl'] = segmentation_edl_factor * self.losses_fn['segmentation_edl'](
-            #     output['segmentation'], labels['segmentation'], batch_idx,
-            #     self.current_epoch
-            # )
-            # loss['segmentation_edl_uncertainty'] = 0.5 * self.model.segmentation_edl_weight
+            # segmentation edl
+            segmentation_edl_factor = 1 / (2 * torch.exp(self.model.segmentation_edl_weight))
+            loss['segmentation_edl'] = segmentation_edl_factor * self.losses_fn['segmentation_edl'](
+                output['segmentation'], labels['segmentation'], batch_idx,
+                self.current_epoch
+            )
+            loss['segmentation_edl_uncertainty'] = 0.5 * self.model.segmentation_edl_weight
 
             # Pedestrian
             if self.cfg.SEMANTIC_SEG.PEDESTRIAN.ENABLED:
@@ -245,7 +244,10 @@ class TrainingModule(pl.LightningModule):
             n_present = self.model.receptive_field
 
             # semantic segmentation metric
-            seg_prediction = output['proposal_segmentation'].detach()
+            if 'segmentation' in output:
+                seg_prediction = output['segmentation'].detach()
+            else:
+                seg_prediction = output['proposal_segmentation'].detach()
             seg_prediction = torch.argmax(seg_prediction, dim=2, keepdim=True)
             self.metric_vehicle_val(seg_prediction[:, n_present - 1:], labels['segmentation'][:, n_present - 1:])
 

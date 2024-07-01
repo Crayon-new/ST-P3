@@ -107,7 +107,7 @@ class STP3(nn.Module):
             self.transformer_decoder = build_transformer_layer_sequence(self.transformer_decoder_cfg.decoder)
             self.transformer_decoder.init_weights()
 
-            self.decoder = Decoder(
+            self.idecoder = Decoder(
                 in_channels=self.future_pred_in_channels,
                 n_classes=len(self.cfg.SEMANTIC_SEG.VEHICLE.WEIGHTS),
                 n_present=self.receptive_field,
@@ -175,8 +175,8 @@ class STP3(nn.Module):
         future_egomotion = future_egomotion[:, :self.receptive_field].contiguous() #(2, 3, 6)
 
         # Lifting features and project to bird's-eye view
-        x, depth, cam_front, projected_depth_unc = self.calculate_birds_eye_view_features(image, intrinsics, extrinsics, future_egomotion) # (3,3,64,200,200)
-        output = {**output, 'depth_prediction': depth, 'cam_front':cam_front, 'depth_unc': projected_depth_unc}
+        x, depth, cam_front, depth_entropy = self.calculate_birds_eye_view_features(image, intrinsics, extrinsics, future_egomotion) # (3,3,64,200,200)
+        output = {**output, 'depth_prediction': depth, 'cam_front':cam_front, 'depth_entropy': depth_entropy}
 
         if self.cfg.MODEL.TEMPORAL_MODEL.INPUT_EGOPOSE:
             b, s, c = future_egomotion.shape
@@ -189,6 +189,7 @@ class STP3(nn.Module):
 
         #  Temporal model
         states = self.temporal_model(x)
+        bev_output = self.simple_decoder(states)
 
         # if self.dist_feat:
         #     mean_states, sigma_states, states = self.distribution_forward_2(states)
@@ -196,7 +197,8 @@ class STP3(nn.Module):
             # np.save("/home2/huangzj/github_respo/ST-P3/imgs/sigma.npy", sigma_states.detach().cpu().numpy())
 
         if self.n_future > 0:
-            proposal_output = self.simple_decoder(states)
+            # proposal_output = self.simple_decoder(states)
+            # _, unc = self.sample_with_uncertainty(proposal_output['mean_states'], proposal_output['sigma_states'], 100)
             future_states = self.transformer_decoder(states, self.cfg.TIME_RECEPTIVE_FIELD, self.cfg.N_FUTURE_FRAMES)
             states = torch.cat([states, future_states], 1)
 
@@ -218,11 +220,8 @@ class STP3(nn.Module):
             # states = self.future_prediction(future_prediction_input, states) #(2, 9, 64, 200, 200)
 
             # predict BEV outputs
-            bev_output = self.decoder(states)
-
-        else:
-            # Perceive BEV outputs
-            bev_output = self.simple_decoder(states)
+            ibev_output = self.idecoder(states)
+            output = {**output, **ibev_output}
 
         output = {**output, **bev_output}
         # _, output['UQ'] = self.sample_with_uncertainty(output['mean_states'], output['sigma_states'], 100)
@@ -382,21 +381,15 @@ class STP3(nn.Module):
 
         depth_entropy = self.calculate_depth_entropy(depth)
         self.discount = 0
-        projected_depth_unc = self.projection_to_birds_eye_view(depth_entropy, geometry, future_egomotion).squeeze(2)
-
-        # projected_depth_unc = F.max_pool2d(projected_depth_unc, kernel_size=3, stride=1, padding=1)
-
-        # # 使用双线性插值去除NaN值
-        # projected_depth_unc = F.interpolate(projected_depth_unc, size=(200, 200), mode='bilinear', align_corners=True)
-        # projected_depth_unc = torch.nan_to_num(projected_depth_unc, nan=0.0) # 将NaN值替换为0
 
         self.discount = self.cfg.LIFT.DISCOUNT
 
-        return x, depth, cam_front, projected_depth_unc
+        return x, depth, cam_front, depth_entropy
 
     def calculate_depth_entropy(self, depth):
+        depth = depth.softmax(dim=3)
         depth_entropy = -1 * depth * torch.log(depth + 1e-12)
-        depth_entropy = torch.sum(depth_entropy, dim=3, keepdim=True).expand_as(depth).unsqueeze(-1)
+        depth_entropy = torch.sum(depth_entropy, dim=3)
         return depth_entropy
 
     def distribution_forward(self, present_features, min_log_sigma, max_log_sigma):

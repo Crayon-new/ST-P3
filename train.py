@@ -40,7 +40,7 @@ def main():
             cfg.PRETRAINED.PATH, map_location='cpu'
         )['state_dict']
         state = model.state_dict()
-        pretrained_model_weights = {k: v for k, v in pretrained_model_weights.items() if k in state and 'decoder' not in k}
+        pretrained_model_weights = {k: v for k, v in pretrained_model_weights.items() if k in state}
         model.load_state_dict(pretrained_model_weights, strict=False)
         print(f'Loaded single-image model weights from {cfg.PRETRAINED.PATH}')
 

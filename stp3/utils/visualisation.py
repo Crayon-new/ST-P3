@@ -266,7 +266,10 @@ def visualise_output(labels, output, cfg):
                                      semantic_plot, center_plot, offset_plot, pedestrian_plot, planning_plot], axis=0))
 
         # Predictions
-        semantic_seg = output['segmentation'].argmax(dim=2).detach().cpu().numpy()
+        if 'segmentation' in output:
+            semantic_seg = output['segmentation'].argmax(dim=2).detach().cpu().numpy() 
+        else:
+            semantic_seg = output['proposal_segmentation'].argmax(dim=2).detach().cpu().numpy()
         semantic_plot = semantic_colours[semantic_seg[b, t][::-1, ::-1]]
         semantic_plot = make_contour(semantic_plot)
 
