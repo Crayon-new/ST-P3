@@ -55,7 +55,7 @@ class SegmentationLoss(nn.Module):
         b, s, c, h, w = prediction.shape
 
         prediction = prediction.view(b * s, c, h, w)
-        target = target.view(b * s, h, w)
+        target = target.contiguous().view(b * s, h, w)
         loss = F.cross_entropy(
             prediction,
             target,
