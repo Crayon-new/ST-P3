@@ -193,6 +193,7 @@ class FutureDecoder(TransformerLayerSequence):
         for seq in range(n_futures):
             time_embed = bev_time[:, n_past+seq, :, :].squeeze(1)
             time_embed = time_embed.transpose(1, 2)
+            bev_query = bev_query + time_embed
             for lid, layer in enumerate(self.layers):
                 output = layer(
                     bev_query,
@@ -200,7 +201,6 @@ class FutureDecoder(TransformerLayerSequence):
                     prev_bev,
                     uncertainty,
                     pos_embed=bev_pos,
-                    time_embed=time_embed,
                     ref_2d=ref_2d,
                     tempo_ref_2d=tempo_ref_2d,
                     bev_h=bev_h,
