@@ -198,8 +198,8 @@ class STP3(nn.Module):
 
         if self.n_future > 0:
             # proposal_output = self.simple_decoder(states)
-            # _, unc = self.sample_with_uncertainty(proposal_output['mean_states'], proposal_output['sigma_states'], 100)
-            future_states = self.transformer_decoder(states, self.cfg.TIME_RECEPTIVE_FIELD, self.cfg.N_FUTURE_FRAMES)
+            unc = self.get_uncertainty(bev_output['mean_states'], bev_output['sigma_states'], 100)
+            future_states = self.transformer_decoder(states, unc, self.cfg.TIME_RECEPTIVE_FIELD, self.cfg.N_FUTURE_FRAMES)
             states = torch.cat([states, future_states], 1)
 
             # present_state = states[:, -1:].contiguous()
@@ -224,7 +224,7 @@ class STP3(nn.Module):
             output = {**output, **ibev_output}
 
         output = {**output, **bev_output}
-        # _, output['UQ'] = self.sample_with_uncertainty(output['mean_states'], output['sigma_states'], 100)
+        # output['UQ'] = self.get_uncertainty(output['mean_states'], output['sigma_states'], 100)
 
         return output
 
@@ -456,20 +456,21 @@ class STP3(nn.Module):
 
         return sample
 
-    def sample_with_uncertainty(self, mean_states, sigma_states, sample_num):
-        if self.training:
-            sample_states = mean_states + sigma_states.mul(0.5).exp_() * torch.randn_like(mean_states)
-        else:
-            for i in range(sample_num):
-                sample = mean_states + sigma_states.mul(0.5).exp_() * torch.randn_like(mean_states)
-                soft_max_sample = F.softmax(sample, dim=1)
-                soft_max_sample = soft_max_sample[:, 1:]
-                if i == 0:
-                    sample_states = soft_max_sample
-                else:
-                    sample_states = torch.cat([sample_states, soft_max_sample], dim=1)
+    def sample_with_uncertainty(self, mean_states, sigma_states):
+        sample_states = mean_states + sigma_states.mul(0.5).exp_() * torch.randn_like(mean_states)
+        return sample_states
+    
+    def get_uncertainty(self, mean_states, sigma_states, sample_num):
+        for i in range(sample_num):
+            sample = mean_states + sigma_states.mul(0.5).exp_() * torch.randn_like(mean_states)
+            soft_max_sample = F.softmax(sample, dim=1)
+            soft_max_sample = soft_max_sample[:, 1:]
+            if i == 0:
+                sample_states = soft_max_sample
+            else:
+                sample_states = torch.cat([sample_states, soft_max_sample], dim=1)
         var = torch.var(sample_states, dim=1, keepdim=True)
-        return sample_states, var
+        return var
 
     def distribution_forward_2(self, states):
         b, n, c, h, w = states.shape

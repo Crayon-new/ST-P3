@@ -144,6 +144,7 @@ class FutureDecoder(TransformerLayerSequence):
     @auto_fp16()
     def forward(self,
                 prev_bev,
+                uncertainty,
                 n_past,
                 n_futures,
                 **kwargs):
@@ -167,7 +168,8 @@ class FutureDecoder(TransformerLayerSequence):
         bev_time = self.time_encoding(bev_mask)
         bev_pos = self.positional_encoding(bev_mask)
 
-        bev_query = (present_bev.flatten(2, 3)).view(embed_dims*bs, -1).transpose(0, 1).view(-1, bs, embed_dims)  # (num_query, bs, embed_dims)
+        # bev_query = (present_bev.flatten(2, 3)).view(embed_dims*bs, -1).transpose(0, 1).view(-1, bs, embed_dims)  # (num_query, bs, embed_dims)
+        bev_query = torch.zeros([bev_h*bev_w, bs, embed_dims], device=present_bev.device)
         ref_2d = self.get_reference_points(
             bev_h, bev_w, dim='2d', bs=bev_query.size(1), device=bev_query.device, dtype=bev_query.dtype)
 
@@ -196,6 +198,7 @@ class FutureDecoder(TransformerLayerSequence):
                     bev_query,
                     prev_bev,
                     prev_bev,
+                    uncertainty,
                     pos_embed=bev_pos,
                     time_embed=time_embed,
                     ref_2d=ref_2d,
@@ -205,6 +208,7 @@ class FutureDecoder(TransformerLayerSequence):
                     **kwargs)
                 bev_query = output
             intermediate.append(output)
+            bev_query = torch.zeros_like(bev_query)
         intermediate = torch.stack(intermediate, 1).view(bs, n_futures, bev_h, bev_w, embed_dims)
         intermediate = intermediate.permute(0, 1, 4, 2, 3)
         return intermediate

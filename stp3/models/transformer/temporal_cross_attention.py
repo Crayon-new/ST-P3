@@ -134,6 +134,7 @@ class TemporalCrossAttention(BaseModule):
                 query,
                 key=None,
                 value=None,
+                uncertainty=None,
                 identity=None,
                 query_pos=None,
                 key_padding_mask=None,
