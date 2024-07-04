@@ -60,9 +60,9 @@ class TemporalCrossAttention(BaseModule):
     def __init__(self,
                  embed_dims=256,
                  num_heads=8,
-                 num_levels=3, # 不放在queue中的原因是需要加权
-                 num_points=8,
-                 num_bev_queue=1,
+                 num_levels=1, # 不放在queue中的原因是需要加权
+                 num_points=4,
+                 num_bev_queue=3,
                  im2col_step=64,
                  dropout=0.1,
                  batch_first=True,
@@ -119,7 +119,7 @@ class TemporalCrossAttention(BaseModule):
         grid_init = (grid_init /
                      grid_init.abs().max(-1, keepdim=True)[0]).view(
             self.num_heads, 1, 1,
-            2).repeat(1, self.num_levels*1, self.num_points, 1)
+            2).repeat(1, self.num_levels*self.num_bev_queue, self.num_points, 1)
 
         for i in range(self.num_points):
             grid_init[:, :, i, :] *= i + 1
@@ -203,26 +203,26 @@ class TemporalCrossAttention(BaseModule):
         if key_padding_mask is not None:
             value = value.masked_fill(key_padding_mask[..., None], 0.0)
 
-        value = value.reshape(bs,
+        value = value.reshape(bs*self.num_bev_queue,
                               num_value, self.num_heads, -1)
 
         sampling_offsets = self.sampling_offsets(query)
         sampling_offsets = sampling_offsets.view(
-            bs, num_query, self.num_heads,  1, self.num_levels, self.num_points, 2)
+            bs, num_query, self.num_heads,  self.num_bev_queue, self.num_levels, self.num_points, 2)
         attention_weights = self.attention_weights(query).view(
-            bs, num_query,  self.num_heads, 1, self.num_levels * self.num_points)
+            bs, num_query,  self.num_heads, self.num_bev_queue, self.num_levels * self.num_points)
         attention_weights = attention_weights.softmax(-1)
 
         attention_weights = attention_weights.view(bs, num_query,
                                                    self.num_heads,
-                                                   1,
+                                                   self.num_bev_queue,
                                                    self.num_levels,
                                                    self.num_points)
 
         attention_weights = attention_weights.permute(0, 3, 1, 2, 4, 5)\
-            .reshape(bs, num_query, self.num_heads, self.num_levels, self.num_points).contiguous()
+            .reshape(bs*self.num_bev_queue, num_query, self.num_heads, self.num_levels, self.num_points).contiguous()
         sampling_offsets = sampling_offsets.permute(0, 3, 1, 2, 4, 5, 6)\
-            .reshape(bs, num_query, self.num_heads, self.num_levels, self.num_points, 2)
+            .reshape(bs*self.num_bev_queue, num_query, self.num_heads, self.num_levels, self.num_points, 2)
 
         if reference_points.shape[-1] == 2:
             offset_normalizer = torch.stack(
@@ -254,6 +254,18 @@ class TemporalCrossAttention(BaseModule):
 
             output = multi_scale_deformable_attn_pytorch(
                 value, spatial_shapes, sampling_locations, attention_weights)
+
+        # output shape (bs*num_bev_queue, num_query, embed_dims)
+        # (bs*num_bev_queue, num_query, embed_dims)-> (num_query, embed_dims, bs*num_bev_queue)
+        output = output.permute(1, 2, 0)
+
+        # fuse history value and current value
+        # (num_query, embed_dims, bs*num_bev_queue)-> (num_query, embed_dims, bs, num_bev_queue)
+        output = output.view(num_query, embed_dims, bs, self.num_bev_queue)
+        output = output.mean(-1)
+
+        # (num_query, embed_dims, bs)-> (bs, num_query, embed_dims)
+        output = output.permute(2, 0, 1)
 
         output = self.output_proj(output)
 

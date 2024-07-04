@@ -232,6 +232,7 @@ class CustomTransformerLayer(BaseModule):
 
         for layer in self.operation_order:
             if layer == 'self_attn':
+                # pass
                 temp_key = temp_value = query
                 query = self.attentions[attn_index](
                     query,
@@ -255,23 +256,23 @@ class CustomTransformerLayer(BaseModule):
                 norm_index += 1
 
             elif layer == 'cross_attn':
-                query = self.attentions[attn_index](
-                    query,
-                    key,
-                    value,
-                    uncertainty,
-                    identity if self.pre_norm else None,
-                    query_pos=query_pos,
-                    key_pos=key_pos,
-                    reference_points=tempo_ref_2d,
-                    attn_mask=attn_masks[attn_index],
-                    spatial_shapes=torch.tensor(
-                        [[bev_h, bev_w]], device=query.device),
-                    key_padding_mask=key_padding_mask,
-                    level_start_index=torch.tensor([0, bev_h*bev_w, 2*bev_h*bev_w], device=query.device),
-                    **kwargs)
-                attn_index += 1
-                identity = query
+               query = self.attentions[attn_index](
+                   query,
+                   key,
+                   value,
+                   uncertainty,
+                   identity if self.pre_norm else None,
+                   query_pos=query_pos,
+                   key_pos=key_pos,
+                   reference_points=tempo_ref_2d,
+                   attn_mask=attn_masks[attn_index],
+                   spatial_shapes=torch.tensor(
+                       [[bev_h, bev_w]], device=query.device),
+                   key_padding_mask=key_padding_mask,
+                   level_start_index=torch.tensor([0], device=query.device),
+                   **kwargs)
+               attn_index += 1
+               identity = query
 
             elif layer == 'ffn':
                 query = self.ffns[ffn_index](

@@ -168,12 +168,12 @@ class FutureDecoder(TransformerLayerSequence):
         bev_time = self.time_encoding(bev_mask)
         bev_pos = self.positional_encoding(bev_mask)
 
-        # bev_query = (present_bev.flatten(2, 3)).view(embed_dims*bs, -1).transpose(0, 1).view(-1, bs, embed_dims)  # (num_query, bs, embed_dims)
-        bev_query = torch.zeros([bev_h*bev_w, bs, embed_dims], device=present_bev.device)
+        bev_query = (present_bev.flatten(2, 3)).view(embed_dims*bs, -1).transpose(0, 1).view(-1, bs, embed_dims)  # (num_query, bs, embed_dims)
+        # bev_query = torch.zeros([bev_h*bev_w, bs, embed_dims], device=present_bev.device)
         ref_2d = self.get_reference_points(
             bev_h, bev_w, dim='2d', bs=bev_query.size(1), device=bev_query.device, dtype=bev_query.dtype)
 
-        tempo_ref_2d = torch.stack([ref_2d.clone() for _ in range(n_past)], 1).permute(0, 2, 1, 3, 4).squeeze(3)
+        tempo_ref_2d = torch.stack([ref_2d.clone() for _ in range(n_past)], 1).reshape(bs*n_past, bev_h*bev_w, 1, 2)
 
         # key, value position embedding for cross attention
         prev_bev = prev_bev + bev_pos.unsqueeze(1)
@@ -186,7 +186,7 @@ class FutureDecoder(TransformerLayerSequence):
         bev_pos = bev_pos.view(bs, embed_dims, -1).transpose(1, 2)
         bev_query = bev_query.transpose(0, 1)
         bev_time = bev_time.view(bs, n_past+n_futures, embed_dims, -1)
-        prev_bev = prev_bev.permute(0, 1, 3, 2).reshape(bs, -1, embed_dims) # (bs, 3*40000, 64)
+        prev_bev = prev_bev.permute(0, 1, 3, 2).reshape(bs*n_past, bev_h * bev_w, embed_dims) # (bs*3, 40000, 64)
 
         intermediate = []
         # Autoregression
@@ -208,7 +208,6 @@ class FutureDecoder(TransformerLayerSequence):
                     **kwargs)
                 bev_query = output
             intermediate.append(output)
-            bev_query = torch.zeros_like(bev_query)
         intermediate = torch.stack(intermediate, 1).view(bs, n_futures, bev_h, bev_w, embed_dims)
         intermediate = intermediate.permute(0, 1, 4, 2, 3)
         return intermediate
