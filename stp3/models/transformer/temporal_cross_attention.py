@@ -107,6 +107,11 @@ class TemporalCrossAttention(BaseModule):
                                            num_bev_queue*num_heads * num_levels * num_points)
         self.value_proj = nn.Linear(embed_dims, embed_dims)
         self.output_proj = nn.Linear(embed_dims, embed_dims)
+        self.weights_mlp = nn.Sequential(
+            nn.Linear(12, 48),
+            nn.ReLU(),
+            nn.Linear(48, 4),
+        )
         self.init_weights()
 
     def init_weights(self):
@@ -211,7 +216,7 @@ class TemporalCrossAttention(BaseModule):
             bs, num_query, self.num_heads,  self.num_bev_queue, self.num_levels, self.num_points, 2)
         attention_weights = self.attention_weights(query).view(
             bs, num_query,  self.num_heads, self.num_bev_queue, self.num_levels * self.num_points)
-        attention_weights = attention_weights.softmax(-1)
+        # attention_weights = attention_weights.softmax(-1)
 
         attention_weights = attention_weights.view(bs, num_query,
                                                    self.num_heads,
@@ -241,7 +246,19 @@ class TemporalCrossAttention(BaseModule):
                 f'Last dim of reference_points must be'
                 f' 2 or 4, but get {reference_points.shape[-1]} instead.')
         if torch.cuda.is_available() and value.is_cuda:
-
+            sampling_grids = 2 * sampling_locations - 1
+            sampling_grids = sampling_grids.view(bs*self.num_bev_queue, 1, -1, 2)
+            sampling_unc = F.grid_sample(
+                uncertainty,
+                sampling_grids,
+                mode='bilinear',
+                padding_mode='zeros',
+                align_corners=False)
+            sampling_unc = sampling_unc.view(bs*self.num_bev_queue, 3, -1).permute(0, 2, 1)
+            sampling_unc = sampling_unc.reshape(bs*self.num_bev_queue, -1, 12)
+            unc_offset = self.weights_mlp(sampling_unc).reshape(bs*self.num_bev_queue, num_query, self.num_heads, self.num_levels, self.num_points)
+            attention_weights = attention_weights + unc_offset
+            attention_weights = attention_weights.softmax(-1)
             # using fp16 deformable attention is unstable because it performs many sum operations
             if value.dtype == torch.float16:
                 MultiScaleDeformableAttnFunction = MultiScaleDeformableAttnFunction_fp32

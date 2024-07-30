@@ -199,6 +199,8 @@ class STP3(nn.Module):
         if self.n_future > 0:
             # proposal_output = self.simple_decoder(states)
             unc = self.get_uncertainty(bev_output['mean_states'], bev_output['sigma_states'], 100)
+            # concat with logits
+            unc = torch.concat((unc, bev_output['mean_states']), dim=1)
             future_states = self.transformer_decoder(states, unc, self.cfg.TIME_RECEPTIVE_FIELD, self.cfg.N_FUTURE_FRAMES)
             states = torch.cat([states, future_states], 1)
 
@@ -224,7 +226,7 @@ class STP3(nn.Module):
             output = {**output, **ibev_output}
 
         output = {**output, **bev_output}
-        # output['UQ'] = self.get_uncertainty(output['mean_states'], output['sigma_states'], 100)
+        output['UQ'] = self.get_uncertainty(output['mean_states'], output['sigma_states'], 100)
 
         return output
 
