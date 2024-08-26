@@ -108,9 +108,9 @@ class TemporalCrossAttention(BaseModule):
         self.value_proj = nn.Linear(embed_dims, embed_dims)
         self.output_proj = nn.Linear(embed_dims, embed_dims)
         self.weights_mlp = nn.Sequential(
-            nn.Linear(12, 48),
+            nn.Linear(8, 32),
             nn.ReLU(),
-            nn.Linear(48, 4),
+            nn.Linear(32, 4),
         )
         self.init_weights()
 
@@ -254,10 +254,10 @@ class TemporalCrossAttention(BaseModule):
                 mode='bilinear',
                 padding_mode='zeros',
                 align_corners=False)
-            sampling_unc = sampling_unc.view(bs*self.num_bev_queue, 3, -1).permute(0, 2, 1)
-            sampling_unc = sampling_unc.reshape(bs*self.num_bev_queue, -1, 12)
+            sampling_unc = sampling_unc.view(bs*self.num_bev_queue, 2, -1).permute(0, 2, 1)
+            sampling_unc = sampling_unc.reshape(bs*self.num_bev_queue, -1, 2*self.num_points)
             unc_offset = self.weights_mlp(sampling_unc).reshape(bs*self.num_bev_queue, num_query, self.num_heads, self.num_levels, self.num_points)
-            attention_weights = attention_weights + unc_offset
+            attention_weights = attention_weights*0 + unc_offset
             attention_weights = attention_weights.softmax(-1)
             # using fp16 deformable attention is unstable because it performs many sum operations
             if value.dtype == torch.float16:
