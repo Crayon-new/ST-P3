@@ -270,26 +270,26 @@ def make_instance_id_temporally_consistent(pred_inst, future_flow, matching_thre
 
 
 def predict_instance_segmentation_and_trajectories(
-        output, compute_matched_centers=False, make_consistent=True, vehicles_id=1,
+        output, n_present, compute_matched_centers=False, make_consistent=True, vehicles_id=1,
 ):
-    preds = output['segmentation'].detach()
+    preds = output['segmentation'][:, n_present - 1:].detach()
     if preds.size(2) >1:
         preds = torch.argmax(preds, dim=2, keepdim=True)
     foreground_masks = preds.squeeze(2) == vehicles_id
     if 'instance_flow' in output:
-        flow = output['instance_flow']
+        flow = output['instance_flow'][:, n_present - 1:]
     else:
-        flow = output['flow']
+        flow = output['flow'][:, n_present - 1:]
     
     if'instance_center' in output:
-        center = output['instance_center']
+        center = output['instance_center'][:, n_present - 1:]
     else:
-        center = output['centerness']
+        center = output['centerness'][:, n_present - 1:]
     
     if 'instance_offset' in output:
-        offset = output['instance_offset']
+        offset = output['instance_offset'][:, n_present - 1:]
     else:
-        offset = output['offset']
+        offset = output['offset'][:, n_present - 1:]
 
     batch_size, seq_len = preds.shape[:2]
     pred_inst = []

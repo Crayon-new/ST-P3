@@ -11,7 +11,6 @@ from matplotlib import pyplot as plt
 import pathlib
 import datetime
 
-
 from stp3.datas.NuscenesData import FuturePredictionDataset
 from stp3.trainer import TrainingModule
 from stp3.metrics import IntersectionOverUnion, PanopticMetric, PlanningMetric
@@ -46,9 +45,9 @@ def eval(checkpoint_path, dataroot, version):
     cfg.DATASET.MAP_FOLDER = dataroot
     cfg.DATASET.VERSION = version
 
-    cfg.DATASET.USE_CORRUPTION = True 
-    cfg.DATASET.CORRUPTION_TYPE = 'Snow'
-    cfg.DATASET.CORRUPTION_LEVEL = 'hard'
+    cfg.DATASET.USE_CORRUPTION = True
+    cfg.DATASET.CORRUPTION_TYPE = 'Fog'
+    cfg.DATASET.CORRUPTION_LEVEL = 'mid'
     cfg.DATASET.CORRUPTION_DATAROOT = 'data/nuScenes-c'
 
     cfg.MODEL.TEST_SAMPLE_NUM = 100
@@ -69,7 +68,9 @@ def eval(checkpoint_path, dataroot, version):
             device)
         iou_metrics[key] = IntersectionOverUnion(n_classes).to(device)
 
-    for i, batch in enumerate(tqdm(valloader)):
+    for i, batch in enumerate(tqdm((valloader))):
+        if i>50:
+            break
         preprocess_batch(batch, device)
         image = batch['image']
         intrinsics = batch['intrinsics']
@@ -87,8 +88,9 @@ def eval(checkpoint_path, dataroot, version):
             )
 
         # Consistent instance seg
+        n_present = output['segmentation'].size(1) - 4 
         pred_consistent_instance_seg = predict_instance_segmentation_and_trajectories(
-            output, compute_matched_centers=False, make_consistent=True
+            output, n_present, compute_matched_centers=False, make_consistent=True
         )
 
         segmentation_pred = output['segmentation'].detach()
@@ -97,7 +99,7 @@ def eval(checkpoint_path, dataroot, version):
         for key, grid in EVALUATION_RANGES.items():
             limits = slice(grid[0], grid[1])
             panoptic_metrics[key](pred_consistent_instance_seg[..., limits, limits].contiguous().detach(),
-                                  labels['instance'][..., limits, limits].contiguous()
+                                  labels['instance'][..., limits, limits][:, n_present-1:].contiguous()
                                   )
 
             iou_metrics[key](segmentation_pred[..., limits, limits].contiguous(),
@@ -120,7 +122,8 @@ def eval(checkpoint_path, dataroot, version):
 
 if __name__ == '__main__':
     parser = ArgumentParser(description='Fiery evaluation')
-    parser.add_argument('--checkpoint', default='/home/huangzj/github_repo/ST-P3/tensorboard_logs/25July2024at23_50_24CST_v100gpu001_Prediction/default/version_0/checkpoints/epoch=9-step=19489.ckpt', type=str, help='path to checkpoint')
+    parser.add_argument('--checkpoint', default='/home2/huangzj/github_respo/ST-P3/tensorboard_logs/01June2024at21_20_51CST_v100gpu004_Perception/default/version_0/checkpoints/epoch=19-step=43539.ckpt', type=str, help='path to checkpoint')
+    # parser.add_argument('--checkpoint', default='/home/huangzj/github_repo/ST-P3/tensorboard_logs/25July2024at23_50_24CST_v100gpu001_Prediction/default/version_0/checkpoints/epoch=9-step=19489.ckpt', type=str, help='path to checkpoint')
     parser.add_argument('--dataroot', default='./data/nuscene', type=str, help='path to the dataset')
     parser.add_argument('--version', default='trainval', type=str, choices=['mini', 'trainval'],
                         help='dataset version')

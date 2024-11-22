@@ -139,7 +139,7 @@ class TrainingModule(pl.LightningModule):
         if is_train:
             # segmentation
             segmentation_factor = 1 / (2 * torch.exp(self.model.segmentation_weight))
-            loss['proposal_segmentation'] = segmentation_factor * self.losses_fn['segmentation'](
+            loss['proposal_segmentation'] = segmentation_factor  * self.losses_fn['segmentation'](
                 output['proposal_segmentation'], labels['segmentation'][:, :self.model.receptive_field], self.model.receptive_field
             )
             loss['segmentation_uncertainty'] = 0.5 * self.model.segmentation_weight
@@ -270,9 +270,9 @@ class TrainingModule(pl.LightningModule):
             # instance segmentation metric
             if self.cfg.INSTANCE_SEG.ENABLED:
                 pred_consistent_instance_seg = predict_instance_segmentation_and_trajectories(
-                    output, compute_matched_centers=False
+                    output, n_present, compute_matched_centers=False
                 )
-                self.metric_panoptic_val(pred_consistent_instance_seg[:, n_present - 1:],
+                self.metric_panoptic_val(pred_consistent_instance_seg,
                                          labels['instance'][:, n_present - 1:])
 
             # planning metric
@@ -420,8 +420,8 @@ class TrainingModule(pl.LightningModule):
         self.training_step_count += 1
         for key, value in loss.items():
             self.logger.experiment.add_scalar('step_train_loss_' + key, value, global_step=self.training_step_count)
-        if self.training_step_count % self.cfg.VIS_INTERVAL == 0:
-            self.visualise(labels, output, batch_idx, prefix='train')
+        # if self.training_step_count % self.cfg.VIS_INTERVAL == 0:
+            # self.visualise(labels, output, batch_idx, prefix='train')
         return sum(loss.values())
 
     def validation_step(self, batch, batch_idx):
@@ -433,8 +433,8 @@ class TrainingModule(pl.LightningModule):
         self.log('step_predicted_traj_y', output['selected_traj'][0, -1, 1])
         self.log('step_target_traj_y', labels['gt_trajectory'][0, -1, 1])
 
-        if batch_idx == 0:
-            self.visualise(labels, output, batch_idx, prefix='val')
+        # if batch_idx == 0:
+            # self.visualise(labels, output, batch_idx, prefix='val')
 
     def shared_epoch_end(self, step_outputs, is_train):
         if not is_train:

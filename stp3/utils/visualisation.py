@@ -211,7 +211,7 @@ def visualise_output(labels, output, cfg):
 
     if cfg.INSTANCE_SEG.ENABLED:
         consistent_instance_seg = predict_instance_segmentation_and_trajectories(
-            output, compute_matched_centers=False
+            output, 3, compute_matched_centers=False
         )
 
     sequence_length = labels['segmentation'].shape[1]
