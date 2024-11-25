@@ -257,7 +257,7 @@ class TemporalCrossAttention(BaseModule):
             sampling_unc = sampling_unc.view(bs*self.num_bev_queue, 2, -1).permute(0, 2, 1)
             sampling_unc = sampling_unc.reshape(bs*self.num_bev_queue, -1, 2*self.num_points)
             unc_offset = self.weights_mlp(sampling_unc).reshape(bs*self.num_bev_queue, num_query, self.num_heads, self.num_levels, self.num_points)
-            attention_weights = attention_weights*0 + unc_offset
+            attention_weights = attention_weights + unc_offset
             attention_weights = attention_weights.softmax(-1)
             # using fp16 deformable attention is unstable because it performs many sum operations
             if value.dtype == torch.float16:

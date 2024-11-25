@@ -103,6 +103,10 @@ class STP3(nn.Module):
             #     n_res_layers=self.cfg.MODEL.FUTURE_PRED.N_RES_LAYERS,
             # )
 
+            # 冻结参数encoder相关的参数, 感知相关的head参数冻结？
+            for params in self.encoder.parameters():
+                params.requires_grad = False
+
             self.transformer_decoder_cfg = Config.fromfile(self.cfg.TRANSFORMER_CONFIG_PATH)
             self.transformer_decoder = build_transformer_layer_sequence(self.transformer_decoder_cfg.decoder)
             self.transformer_decoder.init_weights()
