@@ -83,6 +83,21 @@ class STP3(nn.Module):
             raise NotImplementedError(f'Temporal module {self.cfg.MODEL.TEMPORAL_MODEL.NAME}.')
 
         self.future_pred_in_channels = self.temporal_model.out_channels
+        # Decoder
+        # self.decoder = Decoder(
+        self.simple_decoder = Simple_Decoder(
+            in_channels=self.future_pred_in_channels,
+            n_classes=len(self.cfg.SEMANTIC_SEG.VEHICLE.WEIGHTS),
+            n_present=self.receptive_field,
+            n_hdmap=len(self.cfg.SEMANTIC_SEG.HDMAP.ELEMENTS),
+            predict_gate = {
+                'perceive_hdmap': self.cfg.SEMANTIC_SEG.HDMAP.ENABLED,
+                'predict_pedestrian': self.cfg.SEMANTIC_SEG.PEDESTRIAN.ENABLED,
+                'predict_instance': self.cfg.INSTANCE_SEG.ENABLED,
+                'predict_future_flow': self.cfg.INSTANCE_FLOW.ENABLED,
+                'planning': self.cfg.PLANNING.ENABLED,
+            }
+        )
         if self.n_future > 0:
             # # probabilistic sampling unused
             # if self.cfg.PROBABILISTIC.ENABLED:
@@ -106,6 +121,8 @@ class STP3(nn.Module):
             # 冻结参数encoder相关的参数, 感知相关的head参数冻结？
             for params in self.encoder.parameters():
                 params.requires_grad = False
+            for params in self.simple_decoder.parameters():
+                params.requires_grad = False
 
             self.transformer_decoder_cfg = Config.fromfile(self.cfg.TRANSFORMER_CONFIG_PATH)
             self.transformer_decoder = build_transformer_layer_sequence(self.transformer_decoder_cfg.decoder)
@@ -125,21 +142,6 @@ class STP3(nn.Module):
                 }
             )
 
-        # Decoder
-        # self.decoder = Decoder(
-        self.simple_decoder = Simple_Decoder(
-            in_channels=self.future_pred_in_channels,
-            n_classes=len(self.cfg.SEMANTIC_SEG.VEHICLE.WEIGHTS),
-            n_present=self.receptive_field,
-            n_hdmap=len(self.cfg.SEMANTIC_SEG.HDMAP.ELEMENTS),
-            predict_gate = {
-                'perceive_hdmap': self.cfg.SEMANTIC_SEG.HDMAP.ENABLED,
-                'predict_pedestrian': self.cfg.SEMANTIC_SEG.PEDESTRIAN.ENABLED,
-                'predict_instance': self.cfg.INSTANCE_SEG.ENABLED,
-                'predict_future_flow': self.cfg.INSTANCE_FLOW.ENABLED,
-                'planning': self.cfg.PLANNING.ENABLED,
-            }
-        )
 
         # Cost function
         # Carla 128, Nuscenes 256
