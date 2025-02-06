@@ -46,9 +46,13 @@ _C.LOGGING_INTERVAL = 500
 
 _C.PRETRAINED = CN()
 _C.PRETRAINED.LOAD_WEIGHTS = False
+# _C.PRETRAINED.PATH = 'checkpoints/pretrained/STP3_plan.ckpt'
 # _C.PRETRAINED.PATH = 'tensorboard_logs/26February2024at13_07_26CST_rtxgpu005_Perception/default/version_0/checkpoints/epoch=19-step=21759.ckpt'
 # _C.PRETRAINED.PATH = 'tensorboard_logs/06July2024at23_25_39CST_v100gpu001_Prediction/default/version_0/checkpoints/last.ckpt'
-_C.PRETRAINED.PATH = 'tensorboard_logs/21August2024at16_41_04UTC_gpu-4v100s-36-182_Prediction/default/version_0/checkpoints/epoch=7-step=15591.ckpt'
+# _C.PRETRAINED.PATH = '/home2/huangzj/github_respo/ST-P3/checkpoints/pretrained/carla.ckpt'
+_C.PRETRAINED.PATH = 'tensorboard_logs/28June2024at21_15_26CST_rtxgpu001_Perception/default/version_0/checkpoints/last.ckpt'
+# _C.PRETRAINED.PATH = 'tensorboard_logs/26November2024at14_42_17UTC_gpu-4v100s-36-182_Perception/default/version_0/checkpoints/last.ckpt'
+# _C.PRETRAINED.PATH = 'tensorboard_logs/06July2024at23_25_39CST_v100gpu001_Prediction/default/version_0/checkpoints/last.ckpt'
 _C.TRANSFORMER_CONFIG_PATH = 'stp3/configs/future_decoder.py'
 
 _C.DATASET = CN()
@@ -178,9 +182,10 @@ _C.COST_FUNCTION.COMFORT = 0.1
 _C.COST_FUNCTION.PROGRESS = 0.5
 _C.COST_FUNCTION.VOLUME = 100.
 
-_C.COST_FUNCTION.KLLoss_WEIGHT = 10.0
-_C.COST_FUNCTION.KLLoss_SIGMA_RANGE = 10.0
-_C.COST_FUNCTION.KLLoss_GAMMA = 5.0
+_C.USE_KL = True
+_C.COST_FUNCTION.KLLoss_WEIGHT = 100.0
+_C.COST_FUNCTION.KLLoss_SIGMA_RANGE = 5.0
+_C.COST_FUNCTION.KLLoss_GAMMA = 1.0
 _C.COST_FUNCTION.UNCERTAINTY_WEIGHT = 0.1
 _C.COST_FUNCTION.EDL_KL_COEF = 0.06
 _C.EDL_USE_KL = False

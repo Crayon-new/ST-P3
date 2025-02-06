@@ -1,10 +1,10 @@
 TAG: 'Perception'
 
-GPUS: [0, 1, 2, 3, 4, 5, 6, 7]
+GPUS: [0, 1, 2, 3]
 
 BATCHSIZE: 3
 PRECISION: 16
-EPOCHS: 20
+EPOCHS: 8
 
 N_WORKERS: 8
 
@@ -28,9 +28,9 @@ MODEL:
 
 SEMANTIC_SEG:
   PEDESTRIAN:
-    ENABLED: True
+    ENABLED: False
   HDMAP:
-    ENABLED: True
+    ENABLED: False
 
 INSTANCE_SEG:
   ENABLED: False
@@ -45,6 +45,9 @@ PLANNING:
   ENABLED: False
 
 OPTIMIZER:
-  LR: 1e-3
+  LR: 1e-4
+
+PRETRAINED:
+   LOAD_WEIGHTS: True
 
 

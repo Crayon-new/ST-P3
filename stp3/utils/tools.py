@@ -464,3 +464,8 @@ def backup_code(save_dir, base_dir, verbose=False):
 
             os.makedirs(dst, exist_ok=True)
             shutil.copy2(src, dst)
+
+def save_tensor_dict(**inp):
+   for key, value in inp.items():
+        np.save("/home2/huangzj/github_respo/ST-P3/cache/{}.npy".format(key),
+                value.detach().cpu().numpy())

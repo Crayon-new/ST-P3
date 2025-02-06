@@ -8,3 +8,6 @@ build/
 checkpoints/
 *.egg
 *egg-info/
+cache/
+.vscode/
+ipynb/

@@ -99,24 +99,6 @@ class STP3(nn.Module):
             }
         )
         if self.n_future > 0:
-            # # probabilistic sampling unused
-            # if self.cfg.PROBABILISTIC.ENABLED:
-            #     # Distribution networks
-            #     self.present_distribution = DistributionModule(
-            #         self.future_pred_in_channels,
-            #         self.latent_dim,
-            #         method=self.cfg.PROBABILISTIC.METHOD
-            #     )
-
-            # # # Future prediction unused
-            # self.future_prediction = FuturePrediction(
-            #     in_channels=self.future_pred_in_channels,
-            #     latent_dim=self.latent_dim,
-            #     n_future=self.n_future,
-            #     mixture=self.cfg.MODEL.FUTURE_PRED.MIXTURE,
-            #     n_gru_blocks=self.cfg.MODEL.FUTURE_PRED.N_GRU_BLOCKS,
-            #     n_res_layers=self.cfg.MODEL.FUTURE_PRED.N_RES_LAYERS,
-            # )
 
             # 冻结参数encoder相关的参数, 感知相关的head参数冻结？
             for params in self.encoder.parameters():
@@ -124,6 +106,7 @@ class STP3(nn.Module):
             for params in self.simple_decoder.parameters():
                 params.requires_grad = False
 
+            # prediction transformer
             self.transformer_decoder_cfg = Config.fromfile(self.cfg.TRANSFORMER_CONFIG_PATH)
             self.transformer_decoder = build_transformer_layer_sequence(self.transformer_decoder_cfg.decoder)
             self.transformer_decoder.init_weights()
@@ -199,11 +182,8 @@ class STP3(nn.Module):
 
         # if self.dist_feat:
         #     mean_states, sigma_states, states = self.distribution_forward_2(states)
-            # print(sigma_states.mean())
-            # np.save("/home2/huangzj/github_respo/ST-P3/imgs/sigma.npy", sigma_states.detach().cpu().numpy())
 
         if self.n_future > 0:
-            # proposal_output = self.simple_decoder(states)
             unc = self.get_uncertainty(bev_output['mean_states'], bev_output['sigma_states'], 100)
             unc = bev_output['sigma_states'] 
             # concat with logits
@@ -211,22 +191,8 @@ class STP3(nn.Module):
             future_states = self.transformer_decoder(states, unc, self.cfg.TIME_RECEPTIVE_FIELD, self.cfg.N_FUTURE_FRAMES)
             states = torch.cat([states, future_states], 1)
 
-            # present_state = states[:, -1:].contiguous()
-            
-            # b, _, c, h, w = present_state.shape
-            
-            # if self.cfg.PROBABILISTIC.ENABLED:
-            #     sample = self.distribution_forward(
-            #         present_state,
-            #         min_log_sigma=self.cfg.MODEL.DISTRIBUTION.MIN_LOG_SIGMA,
-            #         max_log_sigma=self.cfg.MODEL.DISTRIBUTION.MAX_LOG_SIGMA,
-            #     )
-            #     future_prediction_input = sample
-            # else:
-            #     future_prediction_input = present_state.new_zeros(b, 1, self.latent_dim, h, w)
-            
-            # # predict the future
-            # states = self.future_prediction(future_prediction_input, states) #(2, 9, 64, 200, 200)
+            # from stp3.utils.tools import save_tensor_dict # save mid_output
+            # save_tensor_dict(states=states, unc=unc)
 
             # predict BEV outputs
             ibev_output = self.idecoder(states)

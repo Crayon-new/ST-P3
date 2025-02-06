@@ -35,7 +35,7 @@ def mk_save_dir(debug_mode):
 def eval(checkpoint_path, dataroot, debug_mode=False):
     save_path = mk_save_dir(debug_mode)
 
-    trainer = TrainingModule.load_from_checkpoint(checkpoint_path, strict=True)
+    trainer = TrainingModule.load_from_checkpoint(checkpoint_path, strict=False)
     print(f'Loaded weights from \n {checkpoint_path}')
     trainer.eval()
 
@@ -52,9 +52,9 @@ def eval(checkpoint_path, dataroot, debug_mode=False):
 
     cfg.MODEL.SAMPLE_RESULTS = True
 
-    cfg.DATASET.USE_CORRUPTION = False
-    cfg.DATASET.CORRUPTION_TYPE = 'Brightness'
-    cfg.DATASET.CORRUPTION_LEVEL = 'hard'
+    cfg.DATASET.USE_CORRUPTION = True
+    cfg.DATASET.CORRUPTION_TYPE = 'Fog'
+    cfg.DATASET.CORRUPTION_LEVEL = 'mid'
     cfg.DATASET.CORRUPTION_DATAROOT = 'data/nuScenes-c'
 
     cfg.MODEL.TEST_SAMPLE_NUM = 100
@@ -158,7 +158,7 @@ def eval(checkpoint_path, dataroot, debug_mode=False):
                 cur_time = (i+1)*2
                 metric_planning_val[i](final_traj[:,:cur_time].detach(), labels['gt_trajectory'][:,1:cur_time+1], occupancy[:,:cur_time])
 
-        if index % 1 == 0:
+        if index % 100 == 0:
             if cfg.PLANNING.ENABLED:
                 output = {**output, 'pred_trajectory': final_traj}
             save(output, labels, batch, n_present, index, save_path)
@@ -192,208 +192,12 @@ def eval(checkpoint_path, dataroot, debug_mode=False):
     for key, value in results.items():
         print(f'{key} : {value.item()}')
 
-def save(output, labels, batch, n_present, frame, save_path):
-    gt_trajs = labels['gt_trajectory'].cpu()
-    if 'pred_trajectory' in output:
-        gt_trajs = output['pred_trajectory'].detach().cpu()
-    # add self point
-    gt_trajs = torch.cat([torch.zeros((1, 1, 3)), gt_trajs], dim=1)
-    images = batch['image']
-
-    denormalise_img = torchvision.transforms.Compose(
-        (NormalizeInverse(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-         torchvision.transforms.ToPILImage(),)
-    )
-
-    val_w = 2.99
-    val_h = 2.99 * (224. / 480.)
-    plt.figure(1, figsize=(3 * val_w, 6 * val_h))
-    width_ratios = (val_w, val_w, val_w)
-    gs = matplotlib.gridspec.GridSpec(6, 3, width_ratios=width_ratios)
-    gs.update(wspace=0.0, hspace=0.0, left=0.0, right=1.0, top=1.0, bottom=0.0)
-
-    plt.subplot(gs[0, 0])
-    plt.annotate('FRONT LEFT', (0.01, 0.87), c='white', xycoords='axes fraction', fontsize=14)
-    plt.imshow(denormalise_img(images[0, n_present - 1, 0].cpu()))
-    plt.axis('off')
-
-    plt.subplot(gs[0, 1])
-    plt.annotate('FRONT', (0.01, 0.87), c='white', xycoords='axes fraction', fontsize=14)
-    plt.imshow(denormalise_img(images[0, n_present - 1, 1].cpu()))
-    plt.axis('off')
-
-    plt.subplot(gs[0, 2])
-    plt.annotate('FRONT RIGHT', (0.01, 0.87), c='white', xycoords='axes fraction', fontsize=14)
-    plt.imshow(denormalise_img(images[0, n_present - 1, 2].cpu()))
-    plt.axis('off')
-
-    plt.subplot(gs[1, 0])
-    plt.annotate('BACK LEFT', (0.01, 0.87), c='white', xycoords='axes fraction', fontsize=14)
-    showing = denormalise_img(images[0, n_present - 1, 3].cpu())
-    showing = showing.transpose(Image.FLIP_LEFT_RIGHT)
-    plt.imshow(showing)
-    plt.axis('off')
-
-    plt.subplot(gs[1, 1])
-    plt.annotate('BACK', (0.01, 0.87), c='white', xycoords='axes fraction', fontsize=14)
-    showing = denormalise_img(images[0, n_present - 1, 4].cpu())
-    showing = showing.transpose(Image.FLIP_LEFT_RIGHT)
-    plt.imshow(showing)
-    plt.axis('off')
-
-    plt.subplot(gs[1, 2])
-    plt.annotate('BACK_RIGHT', (0.01, 0.87), c='white', xycoords='axes fraction', fontsize=14)
-    showing = denormalise_img(images[0, n_present - 1, 5].cpu())
-    showing = showing.transpose(Image.FLIP_LEFT_RIGHT)
-    plt.imshow(showing)
-    plt.axis('off')
-
-    plt.subplot(gs[2:4, 0])
-    showing = torch.zeros((200, 200, 3)).numpy()
-    showing[:, :] = np.array([219 / 255, 215 / 255, 215 / 255])
-
-    # drivable
-    if output['hdmap'] is not None:
-        hdmap = output['hdmap'].detach()
-        area = torch.argmax(hdmap[0, 2:4], dim=0).cpu().numpy()
-        hdmap_index = area > 0
-        showing[hdmap_index] = np.array([161 / 255, 158 / 255, 158 / 255])
-
-        # lane
-        area = torch.argmax(hdmap[0, 0:2], dim=0).cpu().numpy()
-        hdmap_index = area > 0
-        showing[hdmap_index] = np.array([84 / 255, 70 / 255, 70 / 255])
-    else:
-        hdmap = labels['hdmap'].detach()
-        # lane
-        area = hdmap[0, 0:2][1].cpu().numpy()
-        hdmap_index = area > 0
-        showing[hdmap_index] = np.array([161 / 255, 158 / 255, 158 / 255])
-
-        # drivable
-        area = hdmap[0, 0:2][0].cpu().numpy()
-        hdmap_index = area > 0
-        showing[hdmap_index] = np.array([84 / 255, 70 / 255, 70 / 255])
-
-    # semantic
-    if output['segmentation'] is not None:
-        output['segmentation'], output['seg_uncertainty'] = convert_belief_to_output_and_uncertainty(output['segmentation'])
-        segmentation = output['segmentation'][:, n_present - 1].detach()
-        seg_uncertainty = output['seg_uncertainty'][:, n_present - 1].detach()
-        semantic_seg = torch.argmax(segmentation[0], dim=0).cpu().numpy()
-        semantic_index = semantic_seg > 0
-        showing[semantic_index] = np.array([255 / 255, 128 / 255, 0 / 255])
-
-    if output['pedestrian'] is not None:
-        pedestrian = output['pedestrian'][:, n_present - 1].detach()
-        pedestrian_seg = torch.argmax(pedestrian[0], dim=0).cpu().numpy()
-        pedestrian_index = pedestrian_seg > 0
-        showing[pedestrian_index] = np.array([28 / 255, 81 / 255, 227 / 255])
-
-    plt.imshow(make_contour(showing))
-    plt.axis('off')
-
-    bx = np.array([-50.0 + 0.5 / 2.0, -50.0 + 0.5 / 2.0])
-    dx = np.array([0.5, 0.5])
-    w, h = 1.85, 4.084
-    pts = np.array([
-        [-h / 2. + 0.5, w / 2.],
-        [h / 2. + 0.5, w / 2.],
-        [h / 2. + 0.5, -w / 2.],
-        [-h / 2. + 0.5, -w / 2.],
-    ])
-    pts = (pts - bx) / dx
-    pts[:, [0, 1]] = pts[:, [1, 0]]
-    plt.fill(pts[:, 0], pts[:, 1], '#76b900')
-
-    plt.xlim((200, 0))
-    plt.ylim((0, 200))
-    gt_trajs[0, :, :1] = gt_trajs[0, :, :1] * -1
-    gt_trajs = (gt_trajs[0, :, :2].cpu().numpy() - bx) / dx
-    plt.plot(gt_trajs[:, 0], gt_trajs[:, 1], linewidth=3.0)
-
-    if 'seg_uncertainty' in output:
-
-        # sigma
-        plt.subplot(gs[2:4, 2])
-
-        seg_uncertainty = output['seg_uncertainty'][0].detach().cpu().numpy()
-        seg_uncertainty = np.mean(seg_uncertainty[n_present - 1], axis=0)
-        cmap = cm.ScalarMappable(cmap='viridis')
-        colormap_array = cmap.to_rgba(seg_uncertainty)[:,:,:3]
-        plt.imshow(make_contour(colormap_array))
-        plt.axis('off')
-
-
-        plt.fill(pts[:, 0], pts[:, 1], '#76b900')
-        plt.xlim((200, 0))
-        plt.ylim((0, 200))
-
-    if 'target_prediction_result' in labels:
-        plt.subplot(gs[4:6, 1])
-        plt.imshow(labels['target_prediction_result'])
-        plt.axis('off')
-
-        plt.fill(pts[:, 0], pts[:, 1], '#76b900')
-
-        plt.xlim((200, 0))
-        plt.ylim((0, 200))
-
-    # groud truth representations
-    hdmap = labels['hdmap'].detach()
-
-    plt.subplot(gs[2:4, 1])
-    showing = torch.zeros((200, 200, 3)).numpy()
-    showing[:, :] = np.array([219 / 255, 215 / 255, 215 / 255])
-
-    # lane
-    area = hdmap[0, 0:2][1].cpu().numpy()
-    hdmap_index = area > 0
-    showing[hdmap_index] = np.array([161 / 255, 158 / 255, 158 / 255])
-
-    # drivable
-    area = hdmap[0, 0:2][0].cpu().numpy()
-    hdmap_index = area > 0
-    showing[hdmap_index] = np.array([84 / 255, 70 / 255, 70 / 255])
-
-    # semantic
-    segmentation = labels['segmentation'][:, n_present - 1].detach()
-    semantic_seg = segmentation[0][0].cpu().numpy()
-    semantic_index = semantic_seg > 0
-    showing[semantic_index] = np.array([255 / 255, 128 / 255, 0 / 255])
-
-    if 'pedestrain' in labels and labels['pedestrian'] is not None:
-        pedestrian = labels['pedestrian'][:, n_present - 1].detach()
-        pedestrian_seg = pedestrian[0][0].cpu().numpy()
-        pedestrian_index = pedestrian_seg > 0
-        showing[pedestrian_index] = np.array([28 / 255, 81 / 255, 227 / 255])
-
-    plt.imshow(make_contour(showing))
-    plt.axis('off')
-
-    plt.fill(pts[:, 0], pts[:, 1], '#76b900')
-
-    plt.xlim((200, 0))
-    plt.ylim((0, 200))
-
-    plt.plot(gt_trajs[:, 0], gt_trajs[:, 1], linewidth=3.0)
-
-    if 'prediction_np_result' in output:
-        plt.subplot(gs[4:6, 0])
-        plt.imshow(make_contour(output['prediction_np_result'][::-1, ::-1]))
-        plt.axis('off')
-        plt.axis('off')
-
-        plt.fill(pts[:, 0], pts[:, 1], '#76b900')
-
-    plt.savefig(save_path / ('%04d.png' % frame))
-    plt.close()
 
 if __name__ == '__main__':
     parser = ArgumentParser(description='STP3 evaluation')
-    parser.add_argument('--checkpoint', default='last.ckpt', type=str, help='path to checkpoint')
+    parser.add_argument('--checkpoint', default='/home/huangzj/github_repo/ST-P3/tensorboard_logs/06July2024at15_44_02CST_rtxgpu001_Prediction/default/version_0/checkpoints/epoch=18-step=55536.ckpt', type=str, help='path to checkpoint')
     parser.add_argument('--debug_mode', default=False, type=bool)
-    parser.add_argument('--dataroot', default=None, type=str)
+    parser.add_argument('--dataroot', default='data/nuscene', type=str)
 
     args = parser.parse_args()
     # register module

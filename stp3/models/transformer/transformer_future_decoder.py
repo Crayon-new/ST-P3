@@ -31,7 +31,7 @@ class FutureDecoder(TransformerLayerSequence):
         self.return_intermediate = return_intermediate
         self.positional_encoding = build_positional_encoding(
             positional_encoding)
-        self.time_encoding = build_time_encoding(time_encoding)
+        # self.time_encoding = build_time_encoding(time_encoding)
         self.num_points_in_pillar = num_points_in_pillar
         self.pc_range = pc_range
         self.fp16_enabled = False
@@ -165,7 +165,7 @@ class FutureDecoder(TransformerLayerSequence):
         present_bev = prev_bev[:, -1:].contiguous().squeeze(1)
         bev_mask = torch.zeros_like(present_bev)
 
-        bev_time = self.time_encoding(bev_mask)
+        # bev_time = self.time_encoding(bev_mask)
         bev_pos = self.positional_encoding(bev_mask)
 
         bev_query = (present_bev.flatten(2, 3)).view(embed_dims*bs, -1).transpose(0, 1).view(-1, bs, embed_dims)  # (num_query, bs, embed_dims)
@@ -179,21 +179,21 @@ class FutureDecoder(TransformerLayerSequence):
         prev_bev = prev_bev + bev_pos.unsqueeze(1)
 
         # key, value time embedding for cross attention
-        prev_bev = prev_bev + bev_time[:, :n_past, :, :]
+        # prev_bev = prev_bev + bev_time[:, :n_past, :, :]
         prev_bev = prev_bev.view(bs, n_past, embed_dims, -1)
 
         # batch first
         bev_pos = bev_pos.view(bs, embed_dims, -1).transpose(1, 2)
         bev_query = bev_query.transpose(0, 1)
-        bev_time = bev_time.view(bs, n_past+n_futures, embed_dims, -1)
+        # bev_time = bev_time.view(bs, n_past+n_futures, embed_dims, -1)
         prev_bev = prev_bev.permute(0, 1, 3, 2).reshape(bs*n_past, bev_h * bev_w, embed_dims) # (bs*3, 40000, 64)
 
         intermediate = []
         # Autoregression
         for seq in range(n_futures):
-            time_embed = bev_time[:, n_past+seq, :, :].squeeze(1)
-            time_embed = time_embed.transpose(1, 2)
-            bev_query = bev_query + time_embed
+            # time_embed = bev_time[:, n_past+seq, :, :].squeeze(1)
+            # time_embed = time_embed.transpose(1, 2)
+            # bev_query = bev_query + time_embed
             for lid, layer in enumerate(self.layers):
                 output = layer(
                     bev_query,

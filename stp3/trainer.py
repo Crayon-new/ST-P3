@@ -146,26 +146,30 @@ class TrainingModule(pl.LightningModule):
             )
             loss['segmentation_uncertainty'] = 0.5 * self.model.segmentation_weight
 
-            # KL loss
-            seg_pred = output['proposal_segmentation']
-            seg_pred = seg_pred[:,:self.model.receptive_field]
+            if self.cfg.USE_KL:
+                # KL loss
+                seg_pred = output['proposal_segmentation']
+                seg_pred = seg_pred[:,:self.model.receptive_field]
 
-            softmax_2 = nn.Softmax(dim=2)
-            seg_pred = softmax_2(seg_pred)
-            seg_pred = seg_pred[:,:,1:2,:,:]
+                softmax_2 = nn.Softmax(dim=2)
+                seg_pred = softmax_2(seg_pred)
+                seg_pred = seg_pred[:,:,1:2,:,:]
 
-            seg_pred =  torch.where(labels['segmentation'][:,:self.model.receptive_field] == 1, seg_pred, 1 - seg_pred)
-            seg_pred = seg_pred.view((seg_pred.shape[0]*seg_pred.shape[1], *seg_pred.shape[2:]))
+                seg_pred =  torch.where(labels['segmentation'][:,:self.model.receptive_field] == 1, seg_pred, 1 - seg_pred)
+                seg_pred = seg_pred.view((seg_pred.shape[0]*seg_pred.shape[1], *seg_pred.shape[2:]))
 
-            gt_sigma = torch.ones(*output['sigma_states'].shape,
-                                  device=output['sigma_states'].device) * self.cfg.COST_FUNCTION.KLLoss_SIGMA_RANGE
-            gt_mu = torch.zeros(*output['mean_states'].shape, device=output['mean_states'].device)
+                gt_sigma = torch.ones(*output['sigma_states'].shape,
+                                    device=output['sigma_states'].device) * self.cfg.COST_FUNCTION.KLLoss_SIGMA_RANGE
+                gt_mu = torch.zeros(*output['mean_states'].shape, device=output['mean_states'].device)
 
-            loss['KL_loss'] = (torch.log(gt_sigma) - 0.5 * output['sigma_states'] - 0.5 + (
-                                      output['sigma_states'].exp() + (output['mean_states'] - gt_mu) ** 2) /
-                                      (2 * (gt_sigma ** 2)))
+                loss['KL_loss'] = (torch.log(gt_sigma) - 0.5 * output['sigma_states'] - 0.5 + (
+                                        output['sigma_states'].exp() + (output['mean_states'] - gt_mu) ** 2) /
+                                        (2 * (gt_sigma ** 2)))
+                
+                # FOCAL KL loss
+                # loss['KL_loss'] = (torch.pow((1-seg_pred), self.cfg.COST_FUNCTION.KLLoss_GAMMA)*loss['KL_loss']).mean() * self.cfg.COST_FUNCTION.KLLoss_WEIGHT
+                loss['KL_loss'] = loss['KL_loss'].mean()*self.cfg.COST_FUNCTION.KLLoss_WEIGHT
 
-            loss['KL_loss'] = (torch.pow((1-seg_pred), self.cfg.COST_FUNCTION.KLLoss_GAMMA)*loss['KL_loss']).mean() * self.cfg.COST_FUNCTION.KLLoss_WEIGHT
 
             if self.cfg['N_FUTURE_FRAMES'] != 0:
                 # segmentation edl
@@ -246,7 +250,7 @@ class TrainingModule(pl.LightningModule):
         else:
             n_present = self.model.receptive_field
 
-            # semantic segmentation metric
+            # semantic segmentation metric 感知目前是一个小的proposal head
             if 'segmentation' in output:
                 seg_prediction = output['segmentation'].detach()
             else:

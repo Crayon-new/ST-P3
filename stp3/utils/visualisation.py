@@ -2,10 +2,11 @@ import numpy as np
 import torch
 import matplotlib.pylab
 import matplotlib.pyplot as plt
+from PIL import Image
 import cv2
 from stp3.utils.tools import gen_dx_bx
-
-
+import torchvision
+from stp3.utils.network import NormalizeInverse
 from stp3.utils.instance import predict_instance_segmentation_and_trajectories
 
 DEFAULT_COLORMAP = matplotlib.pylab.cm.jet
@@ -489,3 +490,57 @@ def generate_instance_colours(instance_map):
     return {instance_id: INSTANCE_COLOURS[global_instance_id % len(INSTANCE_COLOURS)] for
             instance_id, global_instance_id in instance_map.items()
             }
+
+def save_imgs_only(batch, n_present, save_path, frame):
+    images = batch['image']
+
+    denormalise_img = torchvision.transforms.Compose(
+        (NormalizeInverse(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+         torchvision.transforms.ToPILImage(),)
+    )
+
+    val_w = 2.99
+    val_h = 2.99 * (224. / 480.)
+    plt.figure(1, figsize=(3 * val_w, 2 * val_h))
+    width_ratios = (val_w, val_w, val_w)
+    gs = matplotlib.gridspec.GridSpec(2, 3, width_ratios=width_ratios)
+    gs.update(wspace=0.0, hspace=0.0, left=0.0, right=1.0, top=1.0, bottom=0.0)
+
+    plt.subplot(gs[0, 0])
+    plt.annotate('FRONT LEFT', (0.01, 0.87), c='white', xycoords='axes fraction', fontsize=14)
+    plt.imshow(denormalise_img(images[0, n_present - 1, 0].cpu()))
+    plt.axis('off')
+
+    plt.subplot(gs[0, 1])
+    plt.annotate('FRONT', (0.01, 0.87), c='white', xycoords='axes fraction', fontsize=14)
+    plt.imshow(denormalise_img(images[0, n_present - 1, 1].cpu()))
+    plt.axis('off')
+
+    plt.subplot(gs[0, 2])
+    plt.annotate('FRONT RIGHT', (0.01, 0.87), c='white', xycoords='axes fraction', fontsize=14)
+    plt.imshow(denormalise_img(images[0, n_present - 1, 2].cpu()))
+    plt.axis('off')
+
+    plt.subplot(gs[1, 0])
+    plt.annotate('BACK LEFT', (0.01, 0.87), c='white', xycoords='axes fraction', fontsize=14)
+    showing = denormalise_img(images[0, n_present - 1, 3].cpu())
+    showing = showing.transpose(Image.FLIP_LEFT_RIGHT)
+    plt.imshow(showing)
+    plt.axis('off')
+
+    plt.subplot(gs[1, 1])
+    plt.annotate('BACK', (0.01, 0.87), c='white', xycoords='axes fraction', fontsize=14)
+    showing = denormalise_img(images[0, n_present - 1, 4].cpu())
+    showing = showing.transpose(Image.FLIP_LEFT_RIGHT)
+    plt.imshow(showing)
+    plt.axis('off')
+
+    plt.subplot(gs[1, 2])
+    plt.annotate('BACK_RIGHT', (0.01, 0.87), c='white', xycoords='axes fraction', fontsize=14)
+    showing = denormalise_img(images[0, n_present - 1, 5].cpu())
+    showing = showing.transpose(Image.FLIP_LEFT_RIGHT)
+    plt.imshow(showing)
+    plt.axis('off')
+
+    plt.savefig(save_path / ('%04d.png' % frame))
+    plt.close()
