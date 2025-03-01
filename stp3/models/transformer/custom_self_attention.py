@@ -58,6 +58,7 @@ class CustomSelfAttention(BaseModule):
                  im2col_step=64,
                  dropout=0.1,
                  batch_first=True,
+                 uncertainty_mask=False,
                  norm_cfg=None,
                  init_cfg=None):
 
@@ -70,6 +71,7 @@ class CustomSelfAttention(BaseModule):
         self.dropout = nn.Dropout(dropout)
         self.batch_first = batch_first
         self.fp16_enabled = False
+        self.uncertainty_mask = uncertainty_mask
 
         # you'd better set dim_per_head to a power of 2
         # which is more efficient in the CUDA implementation
@@ -126,6 +128,7 @@ class CustomSelfAttention(BaseModule):
                 query,
                 key=None,
                 value=None,
+                uncertainty=None,
                 identity=None,
                 query_pos=None,
                 key_padding_mask=None,
@@ -178,7 +181,11 @@ class CustomSelfAttention(BaseModule):
 
             # value = torch.cat([query, query], 0)
 
-        if identity is None:
+        if identity is None and uncertainty is not None and self.uncertainty_mask:
+            # use uncertainty as first identity mask
+            q_mask = uncertainty.view(query.size(0), 3, -1)
+            identity = query*(q_mask[:,2,:].unsqueeze(-1))
+
             identity = query
         if query_pos is not None:
             query = query + query_pos

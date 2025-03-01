@@ -10,7 +10,7 @@ from stp3.models.future_prediction import FuturePrediction
 from stp3.models.decoder import Decoder
 from stp3.models.simple_decoder import Simple_Decoder
 from stp3.models.planning_model import Planning
-from stp3.utils.network import pack_sequence_dim, unpack_sequence_dim, set_bn_momentum
+from stp3.utils.network import pack_sequence_dim, unpack_sequence_dim, set_bn_momentum, normalize_unc_score
 from stp3.utils.geometry import calculate_birds_eye_view_parameters, VoxelsSumming, pose_vec2mat
 from mmcv import Config
 from mmcv.cnn.bricks.transformer import build_transformer_layer_sequence
@@ -185,9 +185,10 @@ class STP3(nn.Module):
 
         if self.n_future > 0:
             unc = self.get_uncertainty(bev_output['mean_states'], bev_output['sigma_states'], 100)
-            unc = bev_output['sigma_states'] 
+            # unc = bev_output['sigma_states'] 
             # concat with logits
             # unc = torch.concat((unc, bev_output['mean_states']), dim=1)
+            unc = normalize_unc_score(unc)
             future_states = self.transformer_decoder(states, unc, self.cfg.TIME_RECEPTIVE_FIELD, self.cfg.N_FUTURE_FRAMES)
             states = torch.cat([states, future_states], 1)
 

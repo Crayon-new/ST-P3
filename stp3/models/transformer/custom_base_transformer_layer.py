@@ -238,6 +238,7 @@ class CustomTransformerLayer(BaseModule):
                     query,
                     temp_key,
                     temp_value,
+                    uncertainty,
                     identity if self.pre_norm else None,
                     query_pos=pos_embed,
                     key_pos=pos_embed,

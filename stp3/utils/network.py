@@ -51,3 +51,10 @@ class NormalizeInverse(torchvision.transforms.Normalize):
 
     def __call__(self, tensor):
         return super().__call__(tensor.clone())
+
+def normalize_unc_score(unc):
+    max_val = unc.max()
+    min_val = unc.min()
+    epsilon = 1e-8
+    normalized_score = (unc - min_val) / (max_val - min_val + epsilon)
+    return normalized_score

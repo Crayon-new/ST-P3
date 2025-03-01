@@ -24,11 +24,11 @@ decoder = dict(
         row_num_embed=bev_h_,
         col_num_embed=bev_w_,
     ),
-    time_encoding=dict(
-        type='LearnedTimeEncoding',
-        time_seq_len=n_past+n_future,
-        num_feats=_time_dim,
-    ),
+    # time_encoding=dict(
+    #     type='LearnedTimeEncoding',
+    #     time_seq_len=n_past+n_future,
+    #     num_feats=_time_dim,
+    # ),
     transformerlayers=dict(
         type='CustomTransformerLayer',
         attn_cfgs=[
@@ -37,6 +37,7 @@ decoder = dict(
                 embed_dims=64,
                 num_heads=8,
                 dropout=0.1,
+                uncertainty_mask=True
             ),
             dict(
                 type='TemporalCrossAttention',
