@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH -o out/3_stp3_prediction.%j.out
-#SBATCH -p v100
-#SBATCH --qos=dcgpu
+#SBATCH -p titan
+#SBATCH --qos=titan
 #SBATCH -J stp3_perc_ori
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=24

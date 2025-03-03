@@ -49,15 +49,15 @@ _C.PRETRAINED.LOAD_WEIGHTS = False
 # _C.PRETRAINED.PATH = 'checkpoints/pretrained/STP3_plan.ckpt'
 # _C.PRETRAINED.PATH = 'tensorboard_logs/26February2024at13_07_26CST_rtxgpu005_Perception/default/version_0/checkpoints/epoch=19-step=21759.ckpt'
 # _C.PRETRAINED.PATH = 'tensorboard_logs/06July2024at23_25_39CST_v100gpu001_Prediction/default/version_0/checkpoints/last.ckpt'
-# _C.PRETRAINED.PATH = '/home2/huangzj/github_respo/ST-P3/checkpoints/pretrained/carla.ckpt'
-_C.PRETRAINED.PATH = 'tensorboard_logs/28June2024at21_15_26CST_rtxgpu001_Perception/default/version_0/checkpoints/last.ckpt'
-# _C.PRETRAINED.PATH = 'tensorboard_logs/26November2024at14_42_17UTC_gpu-4v100s-36-182_Perception/default/version_0/checkpoints/last.ckpt'
-# _C.PRETRAINED.PATH = 'tensorboard_logs/06July2024at23_25_39CST_v100gpu001_Prediction/default/version_0/checkpoints/last.ckpt'
+#_C.PRETRAINED.PATH = 'tensorboard_logs/21August2024at16_41_04UTC_gpu-4v100s-36-182_Prediction/default/version_0/checkpoints/epoch=7-step=15591.ckpt'
+#_C.PRETRAINED.PATH = 'tensorboard_logs/28June2024at21_15_26CST_rtxgpu001_Perception/default/version_0/checkpoints/last.ckpt'
+_C.PRETRAINED.PATH = 'tensorboard_logs/16January2025at06_02_45UTC_gpu-4v100s-36-182_Perception/default/version_0/checkpoints/last.ckpt'
+
 _C.TRANSFORMER_CONFIG_PATH = 'stp3/configs/future_decoder.py'
 
 _C.DATASET = CN()
 
-_C.DATASET.DATAROOT = 'data/nuscene'
+_C.DATASET.DATAROOT = 'data/nuscenes'
 # _C.DATASET.DATAROOT = 'data/carla'
 _C.DATASET.DEPTHROOT = 'data/nuScenes_depth'
 _C.DATASET.CORRUPTION_DATAROOT = 'data/nuScenes-c'
@@ -70,7 +70,7 @@ _C.DATASET.USE_PARTIAL = False
 _C.DATASET.PARTIAL_RATIO = 0.5
 _C.DATASET.VERSION = 'trainval'
 _C.DATASET.NAME = 'nuscenes'
-_C.DATASET.MAP_FOLDER = 'data/nuscene'
+_C.DATASET.MAP_FOLDER = 'data/nuscenes'
 
 _C.DATASET.IGNORE_INDEX = 255  # Ignore index when creating flow/offset labels
 _C.DATASET.FILTER_INVISIBLE_VEHICLES = True  # Filter vehicles that are not visible from the cameras
@@ -183,7 +183,7 @@ _C.COST_FUNCTION.PROGRESS = 0.5
 _C.COST_FUNCTION.VOLUME = 100.
 
 _C.USE_KL = True
-_C.COST_FUNCTION.KLLoss_WEIGHT = 100.0
+_C.COST_FUNCTION.KLLoss_WEIGHT = 1.0
 _C.COST_FUNCTION.KLLoss_SIGMA_RANGE = 5.0
 _C.COST_FUNCTION.KLLoss_GAMMA = 1.0
 _C.COST_FUNCTION.UNCERTAINTY_WEIGHT = 0.1

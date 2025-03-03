@@ -167,8 +167,8 @@ class TrainingModule(pl.LightningModule):
                                         (2 * (gt_sigma ** 2)))
                 
                 # FOCAL KL loss
-                # loss['KL_loss'] = (torch.pow((1-seg_pred), self.cfg.COST_FUNCTION.KLLoss_GAMMA)*loss['KL_loss']).mean() * self.cfg.COST_FUNCTION.KLLoss_WEIGHT
-                loss['KL_loss'] = loss['KL_loss'].mean()*self.cfg.COST_FUNCTION.KLLoss_WEIGHT
+                loss['KL_loss'] = (torch.pow((1-seg_pred), self.cfg.COST_FUNCTION.KLLoss_GAMMA)*loss['KL_loss']).mean() * self.cfg.COST_FUNCTION.KLLoss_WEIGHT
+                # loss['KL_loss'] = loss['KL_loss'].mean()*self.cfg.COST_FUNCTION.KLLoss_WEIGHT
 
 
             if self.cfg['N_FUTURE_FRAMES'] != 0:
