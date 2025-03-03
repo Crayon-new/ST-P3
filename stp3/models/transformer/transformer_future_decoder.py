@@ -195,11 +195,13 @@ class FutureDecoder(TransformerLayerSequence):
             # time_embed = time_embed.transpose(1, 2)
             # bev_query = bev_query + time_embed
             for lid, layer in enumerate(self.layers):
+                unc_mask = (seq == 0) and (lid == 0)
                 output = layer(
                     bev_query,
                     prev_bev,
                     prev_bev,
                     uncertainty,
+                    unc_mask,
                     pos_embed=bev_pos,
                     ref_2d=ref_2d,
                     tempo_ref_2d=tempo_ref_2d,

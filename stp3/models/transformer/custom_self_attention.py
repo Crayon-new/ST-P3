@@ -72,6 +72,7 @@ class CustomSelfAttention(BaseModule):
         self.batch_first = batch_first
         self.fp16_enabled = False
         self.uncertainty_mask = uncertainty_mask
+        self.mask_times = 2 # only mask the first frame
 
         # you'd better set dim_per_head to a power of 2
         # which is more efficient in the CUDA implementation
@@ -129,6 +130,7 @@ class CustomSelfAttention(BaseModule):
                 key=None,
                 value=None,
                 uncertainty=None,
+                unc_mask=False,
                 identity=None,
                 query_pos=None,
                 key_padding_mask=None,
@@ -181,12 +183,13 @@ class CustomSelfAttention(BaseModule):
 
             # value = torch.cat([query, query], 0)
 
-        if identity is None and uncertainty is not None and self.uncertainty_mask:
+        if identity is None and unc_mask and self.uncertainty_mask:
             # use uncertainty as first identity mask
             q_mask = uncertainty.view(query.size(0), 3, -1)
             identity = query*(q_mask[:,2,:].unsqueeze(-1))
-
+        else:
             identity = query
+
         if query_pos is not None:
             query = query + query_pos
         if not self.batch_first:
