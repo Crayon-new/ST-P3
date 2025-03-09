@@ -6,7 +6,7 @@ import logging
 
 from stp3.config import get_cfg
 from stp3.models.stp3 import STP3
-from stp3.losses import SpatialRegressionLoss, SegmentationLoss, HDmapLoss, DepthLoss, Seg_edl_log_loss
+from stp3.losses import SpatialRegressionLoss, SegmentationLoss, HDmapLoss, DepthLoss, Seg_edl_log_loss, Planning_loss
 from stp3.metrics import IntersectionOverUnion, PanopticMetric, PlanningMetric
 from stp3.utils.geometry import cumulative_warp_features_reverse, cumulative_warp_features
 from stp3.utils.instance import predict_instance_segmentation_and_trajectories
@@ -113,7 +113,7 @@ class TrainingModule(pl.LightningModule):
         if self.cfg.PLANNING.ENABLED:
             self.metric_planning_val = PlanningMetric(self.cfg, self.cfg.N_FUTURE_FRAMES)
             self.model.planning_weight = nn.Parameter(torch.tensor(0.0), requires_grad=True)
-
+            self.losses_fn['planning'] = Planning_loss(self.cfg)
         self.training_step_count = 0
 
     def shared_step(self, batch, is_train, batch_idx):
@@ -229,16 +229,24 @@ class TrainingModule(pl.LightningModule):
                 planning_factor = 1 / (2 * torch.exp(self.model.planning_weight))
                 occupancy = torch.logical_or(labels['segmentation'][:, receptive_field:].squeeze(2),
                                              labels['pedestrian'][:, receptive_field:].squeeze(2))
-                pl_loss, final_traj = self.model.planning(
-                    cam_front=output['cam_front'].detach(),
-                    trajs=trajs[:, :, 1:],
-                    gt_trajs=labels['gt_trajectory'][:, 1:],
-                    cost_volume=output['costvolume'][:, receptive_field:],
-                    semantic_pred=occupancy,
-                    hd_map=labels['hdmap'],
-                    commands=command,
-                    target_points=target_points
+                
+                pl_loss = self.losses_fn['planning'](
+                    output['traj_pred'],
+                    labels['gt_trajectory'][:, 1:],
+                    semantic_pred=occupancy
                 )
+                final_traj = output['traj_pred']
+
+                # pl_loss, final_traj = self.model.planning(
+                #     cam_front=output['cam_front'].detach(),
+                #     trajs=trajs[:, :, 1:],
+                #     gt_trajs=labels['gt_trajectory'][:, 1:],
+                #     cost_volume=output['costvolume'][:, receptive_field:],
+                #     semantic_pred=occupancy,
+                #     hd_map=labels['hdmap'],
+                #     commands=command,
+                #     target_points=target_points
+                # )
                 loss['planning'] = planning_factor * pl_loss
                 loss['planning_uncertainty'] = 0.5 * self.model.planning_weight
                 output = {**output, 'selected_traj': torch.cat(

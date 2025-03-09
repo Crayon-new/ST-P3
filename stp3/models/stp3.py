@@ -15,6 +15,7 @@ from stp3.utils.geometry import calculate_birds_eye_view_parameters, VoxelsSummi
 from mmcv import Config
 from mmcv.cnn.bricks.transformer import build_transformer_layer_sequence
 from stp3.ops.bev_pool import QuickCumsumCuda
+from stp3.models.planning.planner import AutoRegressivePlanner
 
 import time
 
@@ -129,7 +130,11 @@ class STP3(nn.Module):
         # Cost function
         # Carla 128, Nuscenes 256
         if self.cfg.PLANNING.ENABLED:
-            self.planning = Planning(cfg, self.encoder_out_channels, 6, gru_state_size=self.cfg.PLANNING.GRU_STATE_SIZE)
+            # self.planning = Planning(cfg, self.encoder_out_channels, 6, gru_state_size=self.cfg.PLANNING.GRU_STATE_SIZE)
+            self.planner = AutoRegressivePlanner(
+                query_dim=64,
+                pred_steps=self.n_future
+            )
 
         set_bn_momentum(self, self.cfg.MODEL.BN_MOMENTUM)
 
@@ -198,6 +203,10 @@ class STP3(nn.Module):
             # predict BEV outputs
             ibev_output = self.idecoder(states)
             output = {**output, **ibev_output}
+            
+            if self.cfg.PLANNING.ENABLED:
+                traj_pred = self.planner(None, future_states, None)
+                output = {**output, 'traj_pred': traj_pred}
 
         output = {**output, **bev_output}
         output['UQ'] = self.get_uncertainty(output['mean_states'], output['sigma_states'], 100)

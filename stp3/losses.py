@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from stp3.cost import Cost_Function
 
 
 class SpatialRegressionLoss(nn.Module):
@@ -261,3 +262,28 @@ class Seg_edl_log_loss(nn.Module):
             loss = loss[:, :, :k]
 
         return torch.mean(loss)
+
+class Planning_loss(nn.Module):
+    def __init__(self, cfg) -> None:
+        super().__init__()
+        self.cost_function = Cost_Function(cfg)
+
+    def compute_L2(self, trajs, gt_traj):
+        '''
+        trajs: torch.Tensor (B, N, n_future, 3)
+        gt_traj: torch.Tensor (B,1, n_future, 3)
+        '''
+        if trajs.ndim == 4 and gt_traj.ndim == 4:
+            return ((trajs[:,:,:,:2] - gt_traj[:,:,:,:2]) ** 2).sum(dim=-1)
+        if trajs.ndim == 3 and gt_traj.ndim == 3:
+            return ((trajs[:, :, :2] - gt_traj[:, :, :2]) ** 2).sum(dim=-1)
+
+        raise ValueError('trajs ndim != gt_traj ndim')
+
+    def forward(self, trajs, gt_traj, semantic_pred=None):
+        '''
+        trajs: torch.Tensor (B, N, n_future, 3)
+        gt_traj: torch.Tensor (B, n_future, 3)
+        '''
+        L = self.compute_L2(trajs, gt_traj)
+        return torch.mean(L)

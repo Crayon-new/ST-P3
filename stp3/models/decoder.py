@@ -81,13 +81,13 @@ class Decoder(nn.Module):
                 nn.Conv2d(shared_out_channels, 2, kernel_size=1, padding=0),
             )
 
-        if self.planning:
-            self.costvolume_head = nn.Sequential(
-                nn.Conv2d(shared_out_channels, shared_out_channels, kernel_size=3, padding=1, bias=False),
-                nn.BatchNorm2d(shared_out_channels),
-                nn.ReLU(inplace=True),
-                nn.Conv2d(shared_out_channels, 1, kernel_size=1, padding=0),
-            )
+        # if self.planning:
+        #     self.costvolume_head = nn.Sequential(
+        #         nn.Conv2d(shared_out_channels, shared_out_channels, kernel_size=3, padding=1, bias=False),
+        #         nn.BatchNorm2d(shared_out_channels),
+        #         nn.ReLU(inplace=True),
+        #         nn.Conv2d(shared_out_channels, 1, kernel_size=1, padding=0),
+        #     )
 
     def forward(self, x):
         b, s, c, h, w = x.shape
@@ -124,7 +124,7 @@ class Decoder(nn.Module):
         instance_center_output = self.instance_center_head(x) if self.predict_instance else None
         instance_offset_output = self.instance_offset_head(x) if self.predict_instance else None
         instance_future_output = self.instance_future_head(x) if self.predict_future_flow else None
-        costvolume = self.costvolume_head(x).squeeze(1) if self.planning else None
+        # costvolume = self.costvolume_head(x).squeeze(1) if self.planning else None
         return {
             'segmentation': segmentation_output.view(b, s, *segmentation_output.shape[1:]),
             'pedestrian': pedestrian_output.view(b, s, *pedestrian_output.shape[1:])
@@ -136,6 +136,6 @@ class Decoder(nn.Module):
             if instance_offset_output is not None else None,
             'instance_flow': instance_future_output.view(b, s, *instance_future_output.shape[1:])
             if instance_future_output is not None else None,
-            'costvolume': costvolume.view(b, s, *costvolume.shape[1:])
-            if costvolume is not None else None,
+            # 'costvolume': costvolume.view(b, s, *costvolume.shape[1:])
+            # if costvolume is not None else None,
         }
