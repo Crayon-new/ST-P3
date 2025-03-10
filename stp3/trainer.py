@@ -294,7 +294,10 @@ class TrainingModule(pl.LightningModule):
 
             # planning metric
             if self.cfg.PLANNING.ENABLED:
-                occupancy = torch.logical_or(seg_prediction, pedestrian_prediction)
+                if self.cfg.SEMANTIC_SEG.PEDESTRIAN.ENABLED:
+                    occupancy = torch.logical_or(seg_prediction, pedestrian_prediction)
+                else:
+                    occupancy = seg_prediction
                 # _, final_traj = self.model.planning(
                 #     cam_front=output['cam_front'].detach(),
                 #     trajs=trajs[:, :, 1:],
@@ -355,19 +358,19 @@ class TrainingModule(pl.LightningModule):
         ).long().contiguous()
         labels['segmentation'] = torch.cat([segmentation_labels_past, segmentation_labels], dim=1)
 
-        if self.cfg.SEMANTIC_SEG.PEDESTRIAN.ENABLED:
-            pedestrian_labels = batch['pedestrian']
-            pedestrian_labels_past = cumulative_warp_features(
-                pedestrian_labels[:, :self.model.receptive_field].float(),
-                future_egomotion[:, :self.model.receptive_field],
-                mode='nearest', spatial_extent=self.spatial_extent,
-            ).long().contiguous()[:, :-1]
-            pedestrian_labels = cumulative_warp_features_reverse(
-                pedestrian_labels[:, (self.model.receptive_field - 1):].float(),
-                future_egomotion[:, (self.model.receptive_field - 1):],
-                mode='nearest', spatial_extent=self.spatial_extent,
-            ).long().contiguous()
-            labels['pedestrian'] = torch.cat([pedestrian_labels_past, pedestrian_labels], dim=1)
+        # if self.cfg.SEMANTIC_SEG.PEDESTRIAN.ENABLED:
+        pedestrian_labels = batch['pedestrian']
+        pedestrian_labels_past = cumulative_warp_features(
+            pedestrian_labels[:, :self.model.receptive_field].float(),
+            future_egomotion[:, :self.model.receptive_field],
+            mode='nearest', spatial_extent=self.spatial_extent,
+        ).long().contiguous()[:, :-1]
+        pedestrian_labels = cumulative_warp_features_reverse(
+            pedestrian_labels[:, (self.model.receptive_field - 1):].float(),
+            future_egomotion[:, (self.model.receptive_field - 1):],
+            mode='nearest', spatial_extent=self.spatial_extent,
+        ).long().contiguous()
+        labels['pedestrian'] = torch.cat([pedestrian_labels_past, pedestrian_labels], dim=1)
 
         # Warp instance labels to present's reference frame
         if self.cfg.INSTANCE_SEG.ENABLED:
