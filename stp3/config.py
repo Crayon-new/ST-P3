@@ -51,7 +51,15 @@ _C.PRETRAINED.LOAD_WEIGHTS = False
 # _C.PRETRAINED.PATH = 'tensorboard_logs/06July2024at23_25_39CST_v100gpu001_Prediction/default/version_0/checkpoints/last.ckpt'
 #_C.PRETRAINED.PATH = 'tensorboard_logs/21August2024at16_41_04UTC_gpu-4v100s-36-182_Prediction/default/version_0/checkpoints/epoch=7-step=15591.ckpt'
 #_C.PRETRAINED.PATH = 'tensorboard_logs/28June2024at21_15_26CST_rtxgpu001_Perception/default/version_0/checkpoints/last.ckpt'
-_C.PRETRAINED.PATH = 'tensorboard_logs/16January2025at06_02_45UTC_gpu-4v100s-36-182_Perception/default/version_0/checkpoints/last.ckpt'
+
+# nuscenes perception base
+# _C.PRETRAINED.PATH = 'tensorboard_logs/16January2025at06_02_45UTC_gpu-4v100s-36-182_Perception/default/version_0/checkpoints/last.ckpt'
+
+# nuscenes prediciton base
+_C.PRETRAINED.PATH = 'tensorboard_logs/03March2025at23_44_49CST_v100gpu002_Prediction/default/version_0/checkpoints/last.ckpt'
+
+# # carla perception base
+# _C.PRETRAINED.PATH = 'tensorboard_logs/18February2025at14_39_15CST_rtxgpu001_CARLA_perception/default/version_0/checkpoints/last.ckpt'
 
 _C.TRANSFORMER_CONFIG_PATH = 'stp3/configs/future_decoder.py'
 

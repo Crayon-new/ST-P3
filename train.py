@@ -67,7 +67,7 @@ def main():
         max_epochs=cfg.EPOCHS,
         weights_summary='top',
         logger=tb_logger,
-        num_sanity_val_steps=0,
+        num_sanity_val_steps=1,
         log_every_n_steps=cfg.LOGGING_INTERVAL,
         plugins=DDPPlugin(find_unused_parameters=False),
         profiler='simple',

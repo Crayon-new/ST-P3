@@ -35,9 +35,9 @@ MODEL:
 
 SEMANTIC_SEG:
   PEDESTRIAN:
-    ENABLED: True
+    ENABLED: False
   HDMAP:
-    ENABLED: True
+    ENABLED: False
 
 INSTANCE_SEG:
   ENABLED: False

@@ -46,7 +46,7 @@ class TrainingModule(pl.LightningModule):
         self.metric_vehicle_val = IntersectionOverUnion(self.n_classes)
 
         if self.cfg['N_FUTURE_FRAMES'] != 0:
-             # Future Prediction loss define
+            # Future Prediction loss define
             self.losses_fn['segmentation_edl'] = Seg_edl_log_loss(
                 class_weights=torch.Tensor(self.cfg.SEMANTIC_SEG.VEHICLE.WEIGHTS),
                 use_top_k=self.cfg.SEMANTIC_SEG.VEHICLE.USE_TOP_K,
@@ -58,7 +58,6 @@ class TrainingModule(pl.LightningModule):
             )
 
             self.model.segmentation_edl_weight = nn.Parameter(torch.tensor(0.0), requires_grad=True)
-
 
         # Pedestrian segmentation
         if self.cfg.SEMANTIC_SEG.PEDESTRIAN.ENABLED:
@@ -141,35 +140,37 @@ class TrainingModule(pl.LightningModule):
         if is_train:
             # segmentation
             segmentation_factor = 1 / (2 * torch.exp(self.model.segmentation_weight))
-            loss['proposal_segmentation'] = segmentation_factor  * self.losses_fn['segmentation'](
-                output['proposal_segmentation'], labels['segmentation'][:, :self.model.receptive_field], self.model.receptive_field
+            loss['proposal_segmentation'] = segmentation_factor * self.losses_fn['segmentation'](
+                output['proposal_segmentation'], labels['segmentation'][:, :self.model.receptive_field],
+                self.model.receptive_field
             )
             loss['segmentation_uncertainty'] = 0.5 * self.model.segmentation_weight
 
             if self.cfg.USE_KL:
                 # KL loss
                 seg_pred = output['proposal_segmentation']
-                seg_pred = seg_pred[:,:self.model.receptive_field]
+                seg_pred = seg_pred[:, :self.model.receptive_field]
 
                 softmax_2 = nn.Softmax(dim=2)
                 seg_pred = softmax_2(seg_pred)
-                seg_pred = seg_pred[:,:,1:2,:,:]
+                seg_pred = seg_pred[:, :, 1:2, :, :]
 
-                seg_pred =  torch.where(labels['segmentation'][:,:self.model.receptive_field] == 1, seg_pred, 1 - seg_pred)
-                seg_pred = seg_pred.view((seg_pred.shape[0]*seg_pred.shape[1], *seg_pred.shape[2:]))
+                seg_pred = torch.where(labels['segmentation'][:, :self.model.receptive_field] == 1, seg_pred,
+                                       1 - seg_pred)
+                seg_pred = seg_pred.view((seg_pred.shape[0] * seg_pred.shape[1], *seg_pred.shape[2:]))
 
                 gt_sigma = torch.ones(*output['sigma_states'].shape,
-                                    device=output['sigma_states'].device) * self.cfg.COST_FUNCTION.KLLoss_SIGMA_RANGE
+                                      device=output['sigma_states'].device) * self.cfg.COST_FUNCTION.KLLoss_SIGMA_RANGE
                 gt_mu = torch.zeros(*output['mean_states'].shape, device=output['mean_states'].device)
 
                 loss['KL_loss'] = (torch.log(gt_sigma) - 0.5 * output['sigma_states'] - 0.5 + (
-                                        output['sigma_states'].exp() + (output['mean_states'] - gt_mu) ** 2) /
-                                        (2 * (gt_sigma ** 2)))
-                
-                # FOCAL KL loss
-                loss['KL_loss'] = (torch.pow((1-seg_pred), self.cfg.COST_FUNCTION.KLLoss_GAMMA)*loss['KL_loss']).mean() * self.cfg.COST_FUNCTION.KLLoss_WEIGHT
-                # loss['KL_loss'] = loss['KL_loss'].mean()*self.cfg.COST_FUNCTION.KLLoss_WEIGHT
+                        output['sigma_states'].exp() + (output['mean_states'] - gt_mu) ** 2) /
+                                   (2 * (gt_sigma ** 2)))
 
+                # FOCAL KL loss
+                loss['KL_loss'] = (torch.pow((1 - seg_pred), self.cfg.COST_FUNCTION.KLLoss_GAMMA) * loss[
+                    'KL_loss']).mean() * self.cfg.COST_FUNCTION.KLLoss_WEIGHT
+                # loss['KL_loss'] = loss['KL_loss'].mean()*self.cfg.COST_FUNCTION.KLLoss_WEIGHT
 
             if self.cfg['N_FUTURE_FRAMES'] != 0:
                 # segmentation edl
@@ -229,11 +230,12 @@ class TrainingModule(pl.LightningModule):
                 planning_factor = 1 / (2 * torch.exp(self.model.planning_weight))
                 occupancy = torch.logical_or(labels['segmentation'][:, receptive_field:].squeeze(2),
                                              labels['pedestrian'][:, receptive_field:].squeeze(2))
-                
+
                 pl_loss = self.losses_fn['planning'](
                     output['traj_pred'],
                     labels['gt_trajectory'][:, 1:],
-                    semantic_pred=occupancy
+                    target_points=target_points,
+                    semantic_pred=occupancy,
                 )
                 final_traj = output['traj_pred']
 
@@ -293,16 +295,17 @@ class TrainingModule(pl.LightningModule):
             # planning metric
             if self.cfg.PLANNING.ENABLED:
                 occupancy = torch.logical_or(seg_prediction, pedestrian_prediction)
-                _, final_traj = self.model.planning(
-                    cam_front=output['cam_front'].detach(),
-                    trajs=trajs[:, :, 1:],
-                    gt_trajs=labels['gt_trajectory'][:, 1:],
-                    cost_volume=output['costvolume'][:, n_present:].detach(),
-                    semantic_pred=occupancy[:, n_present:].squeeze(2),
-                    hd_map=output['hdmap'].detach(),
-                    commands=command,
-                    target_points=target_points
-                )
+                # _, final_traj = self.model.planning(
+                #     cam_front=output['cam_front'].detach(),
+                #     trajs=trajs[:, :, 1:],
+                #     gt_trajs=labels['gt_trajectory'][:, 1:],
+                #     cost_volume=output['costvolume'][:, n_present:].detach(),
+                #     semantic_pred=occupancy[:, n_present:].squeeze(2),
+                #     hd_map=output['hdmap'].detach(),
+                #     commands=command,
+                #     target_points=target_points
+                # )
+                final_traj = final_traj = output['traj_pred']
                 occupancy = torch.logical_or(labels['segmentation'][:, n_present:].squeeze(2),
                                              labels['pedestrian'][:, n_present:].squeeze(2))
                 self.metric_planning_val(final_traj, labels['gt_trajectory'][:, 1:], occupancy)
@@ -311,7 +314,7 @@ class TrainingModule(pl.LightningModule):
                                                      dim=1)}
             else:
                 output = {**output, 'selected_traj': labels['gt_trajectory']}
-        
+
         # output['segmentation'], output['seg_uncertainty'] = convert_belief_to_output_and_uncertainty(output['segmentation'])
         return output, labels, loss
 
@@ -436,7 +439,7 @@ class TrainingModule(pl.LightningModule):
         for key, value in loss.items():
             self.logger.experiment.add_scalar('step_train_loss_' + key, value, global_step=self.training_step_count)
         # if self.training_step_count % self.cfg.VIS_INTERVAL == 0:
-            # self.visualise(labels, output, batch_idx, prefix='train')
+        # self.visualise(labels, output, batch_idx, prefix='train')
         return sum(loss.values())
 
     def validation_step(self, batch, batch_idx):
@@ -449,7 +452,7 @@ class TrainingModule(pl.LightningModule):
         self.log('step_target_traj_y', labels['gt_trajectory'][0, -1, 1])
 
         # if batch_idx == 0:
-            # self.visualise(labels, output, batch_idx, prefix='val')
+        # self.visualise(labels, output, batch_idx, prefix='val')
 
     def shared_epoch_end(self, step_outputs, is_train):
         if not is_train:

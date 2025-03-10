@@ -135,6 +135,11 @@ class STP3(nn.Module):
                 query_dim=64,
                 pred_steps=self.n_future
             )
+            # # 冻结预测部分的权重
+            # for params in self.transformer_decoder.parameters():
+            #     params.requires_grad = False
+            # for params in self.idecoder.parameters():
+            #     params.requires_grad = False
 
         set_bn_momentum(self, self.cfg.MODEL.BN_MOMENTUM)
 

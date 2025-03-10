@@ -280,10 +280,18 @@ class Planning_loss(nn.Module):
 
         raise ValueError('trajs ndim != gt_traj ndim')
 
-    def forward(self, trajs, gt_traj, semantic_pred=None):
+    def forward(self, trajs, gt_trajs, target_points=None, semantic_pred=None):
         '''
         trajs: torch.Tensor (B, N, n_future, 3)
         gt_traj: torch.Tensor (B, n_future, 3)
         '''
-        L = self.compute_L2(trajs, gt_traj)
+        if gt_trajs.ndim == 3:
+            gt_trajs = gt_trajs[:, None]
+        trajs = trajs.unsqueeze(1)
+
+        L2_loss = self.compute_L2(trajs, gt_trajs)
+        safe_loss, prgress_loss = self.cost_function(trajs[:,:,:,:2],
+                             semantic_pred=semantic_pred,
+                             target_point=target_points)
+        L = L2_loss.mean(dim=-1) + safe_loss.sum(-1) + prgress_loss
         return torch.mean(L)
