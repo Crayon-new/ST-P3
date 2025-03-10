@@ -305,7 +305,7 @@ class TrainingModule(pl.LightningModule):
                 #     commands=command,
                 #     target_points=target_points
                 # )
-                final_traj = final_traj = output['traj_pred']
+                final_traj = output['traj_pred']
                 occupancy = torch.logical_or(labels['segmentation'][:, n_present:].squeeze(2),
                                              labels['pedestrian'][:, n_present:].squeeze(2))
                 self.metric_planning_val(final_traj, labels['gt_trajectory'][:, 1:], occupancy)

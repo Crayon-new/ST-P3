@@ -80,4 +80,4 @@ class AutoRegressivePlanner(nn.Module):
             # 自回归反馈
             hidden = decoder_out
         
-        return torch.stack(preds, dim=1)  # [B, 6, 2]
+        return torch.stack(preds, dim=1)  # [B, 6, 3]

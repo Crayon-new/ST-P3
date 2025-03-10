@@ -106,6 +106,8 @@ class STP3(nn.Module):
                 params.requires_grad = False
             for params in self.simple_decoder.parameters():
                 params.requires_grad = False
+            for params in self.temporal_model.parameters():
+                params.requires_grad = False
 
             # prediction transformer
             self.transformer_decoder_cfg = Config.fromfile(self.cfg.TRANSFORMER_CONFIG_PATH)
@@ -140,6 +142,13 @@ class STP3(nn.Module):
             #     params.requires_grad = False
             # for params in self.idecoder.parameters():
             #     params.requires_grad = False
+
+            # 冻结预测部分的权重
+            for params in self.transformer_decoder.parameters():
+                params.requires_grad = False
+            for params in self.idecoder.parameters():
+                params.requires_grad = False
+
 
         set_bn_momentum(self, self.cfg.MODEL.BN_MOMENTUM)
 

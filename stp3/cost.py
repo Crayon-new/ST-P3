@@ -12,12 +12,12 @@ class Cost_Function(nn.Module):
         super(Cost_Function, self).__init__()
 
         self.safetycost = SafetyCost(cfg)
-        self.headwaycost = HeadwayCost(cfg)
-        self.lrdividercost = LR_divider(cfg)
-        self.comfortcost = Comfort(cfg)
+        # self.headwaycost = HeadwayCost(cfg)
+        # self.lrdividercost = LR_divider(cfg)
+        # self.comfortcost = Comfort(cfg)
         self.progresscost = Progress(cfg)
-        self.rulecost = Rule(cfg)
-        self.costvolume = Cost_Volume(cfg)
+        # self.rulecost = Rule(cfg)
+        # self.costvolume = Cost_Volume(cfg)
 
         self.n_future = cfg.N_FUTURE_FRAMES
 
