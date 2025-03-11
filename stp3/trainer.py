@@ -111,8 +111,8 @@ class TrainingModule(pl.LightningModule):
         # Planning
         if self.cfg.PLANNING.ENABLED:
             self.metric_planning_val = PlanningMetric(self.cfg, self.cfg.N_FUTURE_FRAMES)
-            # self.model.planning_weight = nn.Parameter(torch.tensor(0.0), requires_grad=True)
-            self.losses_fn['planning'] = Planning_loss(self.cfg)
+            self.model.planning_weight = nn.Parameter(torch.tensor(0.0), requires_grad=True)
+            # self.losses_fn['planning'] = Planning_loss(self.cfg)
         self.training_step_count = 0
 
     def shared_step(self, batch, is_train, batch_idx):
@@ -227,7 +227,7 @@ class TrainingModule(pl.LightningModule):
             # Planning
             if self.cfg.PLANNING.ENABLED:
                 receptive_field = self.model.receptive_field
-                # planning_factor = 1 / (2 * torch.exp(self.model.planning_weight))
+                planning_factor = 1 / (2 * torch.exp(self.model.planning_weight))
                 occupancy = torch.logical_or(labels['segmentation'][:, receptive_field:].squeeze(2),
                                              labels['pedestrian'][:, receptive_field:].squeeze(2))
 
@@ -249,8 +249,8 @@ class TrainingModule(pl.LightningModule):
                     commands=command,
                     target_points=target_points
                 )
-                loss['planning'] = pl_loss
-                # loss['planning_uncertainty'] = 0.5 * self.model.planning_weight
+                loss['planning'] = planning_factor * pl_loss
+                loss['planning_uncertainty'] = 0.5 * self.model.planning_weight
                 output = {**output, 'selected_traj': torch.cat(
                     [torch.zeros((B, 1, 3), device=final_traj.device), final_traj], dim=1)}
             else:
