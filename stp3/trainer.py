@@ -111,7 +111,7 @@ class TrainingModule(pl.LightningModule):
         # Planning
         if self.cfg.PLANNING.ENABLED:
             self.metric_planning_val = PlanningMetric(self.cfg, self.cfg.N_FUTURE_FRAMES)
-            self.model.planning_weight = nn.Parameter(torch.tensor(0.0), requires_grad=True)
+            # self.model.planning_weight = nn.Parameter(torch.tensor(0.0), requires_grad=True)
             self.losses_fn['planning'] = Planning_loss(self.cfg)
         self.training_step_count = 0
 
@@ -227,30 +227,30 @@ class TrainingModule(pl.LightningModule):
             # Planning
             if self.cfg.PLANNING.ENABLED:
                 receptive_field = self.model.receptive_field
-                planning_factor = 1 / (2 * torch.exp(self.model.planning_weight))
+                # planning_factor = 1 / (2 * torch.exp(self.model.planning_weight))
                 occupancy = torch.logical_or(labels['segmentation'][:, receptive_field:].squeeze(2),
                                              labels['pedestrian'][:, receptive_field:].squeeze(2))
 
-                pl_loss = self.losses_fn['planning'](
-                    output['traj_pred'],
-                    labels['gt_trajectory'][:, 1:],
-                    target_points=target_points,
-                    semantic_pred=occupancy,
-                )
-                final_traj = output['traj_pred']
-
-                # pl_loss, final_traj = self.model.planning(
-                #     cam_front=output['cam_front'].detach(),
-                #     trajs=trajs[:, :, 1:],
-                #     gt_trajs=labels['gt_trajectory'][:, 1:],
-                #     cost_volume=output['costvolume'][:, receptive_field:],
+                # pl_loss = self.losses_fn['planning'](
+                #     output['traj_pred'],
+                #     labels['gt_trajectory'][:, 1:],
+                #     target_points=target_points,
                 #     semantic_pred=occupancy,
-                #     hd_map=labels['hdmap'],
-                #     commands=command,
-                #     target_points=target_points
                 # )
-                loss['planning'] = planning_factor * pl_loss
-                loss['planning_uncertainty'] = 0.5 * self.model.planning_weight
+                # final_traj = output['traj_pred']
+
+                pl_loss, final_traj = self.model.planning(
+                    cam_front=output['cam_front'].detach(),
+                    trajs=trajs[:, :, 1:],
+                    gt_trajs=labels['gt_trajectory'][:, 1:],
+                    cost_volume=output['costvolume'][:, receptive_field:],
+                    semantic_pred=occupancy,
+                    hd_map=labels['hdmap'],
+                    commands=command,
+                    target_points=target_points
+                )
+                loss['planning'] = pl_loss
+                # loss['planning_uncertainty'] = 0.5 * self.model.planning_weight
                 output = {**output, 'selected_traj': torch.cat(
                     [torch.zeros((B, 1, 3), device=final_traj.device), final_traj], dim=1)}
             else:
@@ -298,17 +298,17 @@ class TrainingModule(pl.LightningModule):
                     occupancy = torch.logical_or(seg_prediction, pedestrian_prediction)
                 else:
                     occupancy = seg_prediction
-                # _, final_traj = self.model.planning(
-                #     cam_front=output['cam_front'].detach(),
-                #     trajs=trajs[:, :, 1:],
-                #     gt_trajs=labels['gt_trajectory'][:, 1:],
-                #     cost_volume=output['costvolume'][:, n_present:].detach(),
-                #     semantic_pred=occupancy[:, n_present:].squeeze(2),
-                #     hd_map=output['hdmap'].detach(),
-                #     commands=command,
-                #     target_points=target_points
-                # )
-                final_traj = output['traj_pred']
+                _, final_traj = self.model.planning(
+                    cam_front=output['cam_front'].detach(),
+                    trajs=trajs[:, :, 1:],
+                    gt_trajs=labels['gt_trajectory'][:, 1:],
+                    cost_volume=output['costvolume'][:, n_present:].detach(),
+                    semantic_pred=occupancy[:, n_present:].squeeze(2),
+                    hd_map=output['hdmap'].detach(),
+                    commands=command,
+                    target_points=target_points
+                )
+                # final_traj = output['traj_pred']
                 occupancy = torch.logical_or(labels['segmentation'][:, n_present:].squeeze(2),
                                              labels['pedestrian'][:, n_present:].squeeze(2))
                 self.metric_planning_val(final_traj, labels['gt_trajectory'][:, 1:], occupancy)
@@ -518,9 +518,9 @@ class TrainingModule(pl.LightningModule):
         if self.cfg.INSTANCE_FLOW.ENABLED:
             self.logger.experiment.add_scalar('epoch_flow_weight', 1 / (2 * torch.exp(self.model.flow_weight)),
                                               global_step=self.training_step_count)
-        if self.cfg.PLANNING.ENABLED:
-            self.logger.experiment.add_scalar('epoch_planning_weight', 1 / (2 * torch.exp(self.model.planning_weight)),
-                                              global_step=self.training_step_count)
+        # if self.cfg.PLANNING.ENABLED:
+        #     self.logger.experiment.add_scalar('epoch_planning_weight', 1 / (2 * torch.exp(self.model.planning_weight)),
+        #                                       global_step=self.training_step_count)
 
     def training_epoch_end(self, step_outputs):
         self.shared_epoch_end(step_outputs, True)

@@ -12,17 +12,17 @@ class Cost_Function(nn.Module):
         super(Cost_Function, self).__init__()
 
         self.safetycost = SafetyCost(cfg)
-        # self.headwaycost = HeadwayCost(cfg)
-        # self.lrdividercost = LR_divider(cfg)
-        # self.comfortcost = Comfort(cfg)
+        self.headwaycost = HeadwayCost(cfg)
+        self.lrdividercost = LR_divider(cfg)
+        self.comfortcost = Comfort(cfg)
         self.progresscost = Progress(cfg)
-        # self.rulecost = Rule(cfg)
-        # self.costvolume = Cost_Volume(cfg)
+        self.rulecost = Rule(cfg)
+        self.costvolume = Cost_Volume(cfg)
 
         self.n_future = cfg.N_FUTURE_FRAMES
 
 
-    def forward(self, trajs, cost_volume=None, semantic_pred=None, lane_divider=None, drivable_area=None, target_point=None):
+    def forward(self, cost_volume, trajs, semantic_pred=None, lane_divider=None, drivable_area=None, target_point=None):
         '''
         cost_volume: torch.Tensor<float> (B, n_future, 200, 200)
         trajs: torch.Tensor<float> (B, N, n_future, 2)   N: sample number
@@ -33,18 +33,18 @@ class Cost_Function(nn.Module):
         '''
         trajs = trajs * torch.tensor([-1, 1], device=trajs.device)
         safetycost = torch.clamp(self.safetycost(trajs, semantic_pred), 0, 100)
-        # headwaycost = torch.clamp(self.headwaycost(trajs, semantic_pred, drivable_area), 0, 100)
-        # lrdividercost = torch.clamp(self.lrdividercost(trajs, lane_divider), 0, 100)
-        # comfortcost = torch.clamp(self.comfortcost(trajs), 0, 100)
+        headwaycost = torch.clamp(self.headwaycost(trajs, semantic_pred, drivable_area), 0, 100)
+        lrdividercost = torch.clamp(self.lrdividercost(trajs, lane_divider), 0, 100)
+        comfortcost = torch.clamp(self.comfortcost(trajs), 0, 100)
         progresscost = torch.clamp(self.progresscost(trajs, target_point), -100, 100)
-        # rulecost = torch.clamp(self.rulecost(trajs, drivable_area), 0, 100)
-        # costvolume = torch.clamp(self.costvolume(trajs, cost_volume), 0, 100)
+        rulecost = torch.clamp(self.rulecost(trajs, drivable_area), 0, 100)
+        costvolume = torch.clamp(self.costvolume(trajs, cost_volume), 0, 100)
 
-        # cost_fo = safetycost + headwaycost + lrdividercost + costvolume + rulecost
-        # cost_fc = comfortcost + progresscost
+        cost_fo = safetycost + headwaycost + lrdividercost + costvolume + rulecost
+        cost_fc = comfortcost + progresscost
 
-        # return cost_fc, cost_fo
-        return safetycost, progresscost
+        return cost_fc, cost_fo
+        # return safetycost, progresscost
 
 
 
