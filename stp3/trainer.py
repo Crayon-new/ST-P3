@@ -247,7 +247,8 @@ class TrainingModule(pl.LightningModule):
                     semantic_pred=occupancy,
                     hd_map=labels['hdmap'],
                     commands=command,
-                    target_points=target_points
+                    target_points=target_points,
+                    segmentation = output['segmentation'].detach()
                 )
                 loss['planning'] = planning_factor * pl_loss
                 loss['planning_uncertainty'] = 0.5 * self.model.planning_weight
@@ -306,7 +307,8 @@ class TrainingModule(pl.LightningModule):
                     semantic_pred=occupancy[:, n_present:].squeeze(2),
                     hd_map=output['hdmap'].detach(),
                     commands=command,
-                    target_points=target_points
+                    target_points=target_points,
+                    segmentation = output['segmentation'].detach()
                 )
                 # final_traj = output['traj_pred']
                 occupancy = torch.logical_or(labels['segmentation'][:, n_present:].squeeze(2),

@@ -15,7 +15,7 @@ from stp3.utils.geometry import calculate_birds_eye_view_parameters, VoxelsSummi
 from mmcv import Config
 from mmcv.cnn.bricks.transformer import build_transformer_layer_sequence
 from stp3.ops.bev_pool import QuickCumsumCuda
-from stp3.models.planning.planner import AutoRegressivePlanner
+# from stp3.models.planning.planner import AutoRegressivePlanner
 
 import time
 

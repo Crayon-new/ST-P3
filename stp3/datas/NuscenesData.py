@@ -108,6 +108,12 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
             if scene_no in scenes:
                 scenes.remove(scene_no)
 
+        if self.cfg.DATASET.USE_PARTIAL:
+            import random
+            random.seed(10)
+            random.shuffle(scenes)
+            scenes = scenes[:int(len(scenes)*self.cfg.DATASET.PARTIAL_RATIO)]
+
         return scenes
 
     def prepro(self):

@@ -5,31 +5,37 @@ import numpy as np
 
 from stp3.layers.convolutions import Bottleneck
 from stp3.layers.temporal import SpatialGRU, Dual_GRU, BiGRU
-from stp3.cost import Cost_Function
+from stp3.utils.network import preprocess_batch, NormalizeInverse, convert_belief_to_output_and_uncertainty
+from stp3.cost import Cost_Function, UncCost
+from stp3.models.planning.traj_finetuner import TrajectoryTransformer
+# from stp3.models.planning.traj_finetuner import TrajectoryTransformer
 
 class Planning(nn.Module):
     def __init__(self, cfg, feature_channel, gru_input_size=6, gru_state_size=256):
         super(Planning, self).__init__()
         self.cost_function = Cost_Function(cfg)
+        self.unc_cost = UncCost(cfg)
 
         self.sample_num = cfg.PLANNING.SAMPLE_NUM
         self.commands = cfg.PLANNING.COMMAND
         assert self.sample_num % 3 == 0
         self.num = int(self.sample_num / 3)
 
-        self.reduce_channel = nn.Sequential(
-            Bottleneck(feature_channel, feature_channel, downsample=True),
-            Bottleneck(feature_channel, int(feature_channel/2), downsample=True),
-            Bottleneck(int(feature_channel/2), int(feature_channel/2), downsample=True),
-            Bottleneck(int(feature_channel/2), int(feature_channel/8))
-        )
+        # self.reduce_channel = nn.Sequential(
+        #     Bottleneck(feature_channel, feature_channel, downsample=True),
+        #     Bottleneck(feature_channel, int(feature_channel/2), downsample=True),
+        #     Bottleneck(int(feature_channel/2), int(feature_channel/2), downsample=True),
+        #     Bottleneck(int(feature_channel/2), int(feature_channel/8))
+        # )
 
-        self.GRU = nn.GRUCell(gru_input_size, gru_state_size)
-        self.decoder = nn.Sequential(
-            nn.Linear(gru_state_size, gru_state_size),
-            nn.ReLU(inplace=True),
-            nn.Linear(gru_state_size, 2)
-        )
+        # self.GRU = nn.GRUCell(gru_input_size, gru_state_size)
+        # self.decoder = nn.Sequential(
+        #     nn.Linear(gru_state_size, gru_state_size),
+        #     nn.ReLU(inplace=True),
+        #     nn.Linear(gru_state_size, 2)
+        # )
+        # self.trajectory_transformer = TrajectoryTransformer()
+        self.traj_finetuner = TrajectoryTransformer(32)
 
 
     def compute_L2(self, trajs, gt_traj):
@@ -44,7 +50,7 @@ class Planning(nn.Module):
 
         raise ValueError('trajs ndim != gt_traj ndim')
 
-    def select(self, trajs, cost_volume, semantic_pred, lane_divider, drivable_area, target_points, k=1):
+    def select(self, trajs, cost_volume, semantic_pred, lane_divider, drivable_area, target_points, uncertainty, k=1):
         '''
         trajs: torch.Tensor (B, N, n_future, 3)
         cost_volume: torch.Tensor (B, n_future, 200, 200)
@@ -54,14 +60,19 @@ class Planning(nn.Module):
         target_points: torch.Tensor<float> (B, 2)
         '''
         sm_cost_fc, sm_cost_fo = self.cost_function(cost_volume, trajs[:,:,:,:2], semantic_pred, lane_divider, drivable_area, target_points)
+        unc_cosr = self.unc_cost(trajs[:,:,:,:2], uncertainty)
 
-        CS = sm_cost_fc + sm_cost_fo.sum(dim=-1)
+        CS =sm_cost_fc + sm_cost_fo.sum(dim=-1) + unc_cosr.sum(dim=-1)
+        # CS =sm_cost_fc + sm_cost_fo.sum(dim=-1)
         CC, KK = torch.topk(CS, k, dim=-1, largest=False)
 
         ii = torch.arange(len(trajs))
         select_traj = trajs[ii[:,None], KK].squeeze(1) # (B, n_future, 3)
 
+        # fine_tune_traj = self.trajectory_transformer(select_traj[:, :, :2], segmentation[:, 3:, ], uncertainty[:, 3:, 0])
+
         return select_traj
+        # return fine_tune_traj
 
     def loss(self, trajs, gt_trajs, cost_volume, semantic_pred, lane_divider, drivable_area, target_points):
         '''
@@ -86,7 +97,7 @@ class Planning(nn.Module):
 
         return torch.mean(L)
 
-    def forward(self,cam_front, trajs, gt_trajs, cost_volume, semantic_pred, hd_map, commands, target_points):
+    def forward(self,cam_front, trajs, gt_trajs, cost_volume, semantic_pred, hd_map, commands, target_points, segmentation):
         '''
         cam_front: torch.Tensor (B, 64, 60, 28)
         trajs: torch.Tensor (B, N, n_future, 3)
@@ -98,6 +109,7 @@ class Planning(nn.Module):
         target_points: (B, 2)
         '''
 
+        B, N, n_future, _ = trajs.shape
         cur_trajs = []
         for i in range(len(commands)):
             command = commands[i]
@@ -126,22 +138,26 @@ class Planning(nn.Module):
         else:
             loss = 0
 
-        cam_front = self.reduce_channel(cam_front)
-        h0 = cam_front.flatten(start_dim=1) # (B, 256/128)
-        final_traj = self.select(cur_trajs, cost_volume, semantic_pred, lane_divider, drivable_area, target_points) # (B, n_future, 3)
-        target_points = target_points.to(dtype=h0.dtype)
-        b, s, _ = final_traj.shape
-        x = torch.zeros((b, 2), device=h0.device)
-        output_traj = []
-        for i in range(s):
-            x = torch.cat([x, final_traj[:,i,:2], target_points], dim=-1) # (B, 6)
-            h0 = self.GRU(x, h0)
-            x = self.decoder(h0) # (B, 2)
-            output_traj.append(x)
-        output_traj = torch.stack(output_traj, dim=1) # (B, 4, 2)
+        # cam_front = self.reduce_channel(cam_front)
+        # h0 = cam_front.flatten(start_dim=1) # (B, 256/128)
+        _, uncertainty = convert_belief_to_output_and_uncertainty(segmentation)
 
+        final_traj = self.select(cur_trajs, cost_volume, semantic_pred, lane_divider, drivable_area, target_points, uncertainty) # (B, n_future, 3)
+        # target_points = target_points.to(dtype=h0.dtype)
+        # b, s, _ = final_traj.shape
+        # x = torch.zeros((b, 2), device=h0.device)
+        # output_traj = []
+        # for i in range(s):
+        #     x = torch.cat([x, final_traj[:,i,:2], target_points], dim=-1) # (B, 6)
+        #     h0 = self.GRU(x, h0)
+        #     x = self.decoder(h0) # (B, 2)
+        #     output_traj.append(x)
+        # output_traj = torch.stack(output_traj, dim=1) # (B, 4, 2)
+        # # 避免车向后
+        # output_traj[:, :, 1] = torch.clamp(output_traj[:, :, 1], min=0).detach()
+        finetuned_traj = self.traj_finetuner(final_traj[:, :, :2], uncertainty[:, -n_future:])
         output_traj = torch.cat(
-            [output_traj, torch.zeros((*output_traj.shape[:-1],1), device=output_traj.device)], dim=-1
+            [finetuned_traj[:, :, :2], torch.zeros((*final_traj.shape[:-1],1), device=final_traj.device)], dim=-1
         )
 
         if self.training:

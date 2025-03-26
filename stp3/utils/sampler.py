@@ -5,7 +5,82 @@ import numpy as np
 import torch
 from scipy.special import fresnel
 
-def sample(v0, Kappa, T0, N0, tt, M, possibility = None):
+def sample(v0, Kappa, T0, N0, tt, M, possibility=None):
+    '''
+    :param v0: 初始速度
+    :param Kappa: 曲率
+    :param T0: 初始切向量
+    :param N0: 初始法向量
+    :param tt: 时间序列
+    :param M: 采样数量
+    :param possibility: 概率分布 [左转概率，直行概率，右转概率]
+    :return: 轨迹数组
+    '''
+    if possibility is None:
+        possibility = [0.4, 0.2, 0.4]
+
+    # 计算各类型轨迹数量
+    straight_num = int(M * possibility[1])
+    left_num = int(M * possibility[0])
+    right_num = M - straight_num - left_num
+
+    # 采样初始速度（确保速度非负）
+    v_options = np.stack((np.full(M, v0), 15*np.random.rand(M)))
+    v_selections = (np.random.rand(M) >= 0.2).astype(int)
+    velocities = np.clip(v_options[v_selections, np.arange(M)], 0.1, None)  # 确保最小速度0.1m/s
+
+    # 安全加速度采样
+    t_max = np.max(tt)
+    a_min = -velocities / t_max  # 计算最小允许加速度
+    a_max = 7  # 保持原有最大加速度
+    accelerations = np.random.rand(M) * (a_max - a_min) + a_min  # 在安全范围内采样
+
+    # 生成纵向位移
+    L = velocities[:, None] * tt[None, :] + accelerations[:, None] * (tt[None, :]**2) / 2
+    
+    # 直行轨迹生成
+    line_points = L[:straight_num, :, None] * T0[None, None, :]
+    lines = np.concatenate((line_points, np.zeros_like(line_points[..., :1])), axis=-1)
+
+    # Clothoid曲线参数
+    alphas = (300 - 10) * np.random.rand(left_num + right_num) + 10
+    Xi0 = np.abs(Kappa) / np.pi
+    Xis = Xi0 + L[straight_num:]
+
+    # 计算Fresnel积分
+    Ss, Cs = fresnel(Xis / alphas[:, None])
+
+    # 生成Clothoid曲线点
+    clothoid_points = alphas[:, None, None] * (Cs[:, :, None]*T0 + Ss[:, :, None]*N0)
+    Xs = clothoid_points[..., 0] - clothoid_points[:, 0:1, 0]
+    Ys = clothoid_points[..., 1] - clothoid_points[:, 0:1, 1]
+
+    # 旋转调整
+    clothoid_theta0s = 0.5 * np.pi * ((Kappa / np.pi / alphas) ** 2)[:, None]
+    signed_theta0s = clothoid_theta0s * np.sign(Kappa)
+    clothoid_points[..., 0] = np.cos(signed_theta0s)*Xs + np.sin(signed_theta0s)*Ys
+    clothoid_points[..., 1] = -np.sin(signed_theta0s)*Xs + np.cos(signed_theta0s)*Ys
+
+    # 计算方向角
+    clothoid_thetas = 0.5 * np.pi * ((Xis / alphas[:, None])**2) - clothoid_theta0s
+    wrapped_thetas = (clothoid_thetas * np.sign(Kappa) + np.pi) % (2*np.pi) - np.pi
+    clothoids = np.concatenate((clothoid_points, wrapped_thetas[..., None]), axis=-1)
+
+    # 处理左右转向
+    if Kappa > 0:
+        left_traj = clothoids[:left_num]
+        right_traj = clothoids[left_num:].copy()
+        right_traj[..., [0, 2]] *= -1  # x坐标和方向角取反
+    else:
+        right_traj = clothoids[:left_num]
+        left_traj = clothoids[left_num:].copy()
+        left_traj[..., [0, 2]] *= -1
+
+    # 合并轨迹并排序
+    trajectories = np.concatenate([left_traj, lines, right_traj], axis=0)
+    return trajectories[np.argsort(trajectories[:, -1, 0])]
+
+def sample_cp(v0, Kappa, T0, N0, tt, M, possibility = None):
     '''
     :param v0: initial velocity
     :param Kappa: curvature
@@ -40,7 +115,7 @@ def sample(v0, Kappa, T0, N0, tt, M, possibility = None):
     # print("L:", L)
 
     # scaling factor which determine the Clothiod curve  6 ~ 80
-    alphas = (80 - 6) * np.random.rand(left_num + right_num) + 6
+    alphas = (500 - 10) * np.random.rand(left_num + right_num) + 10
 
     ############################################################################
     # sample M straight lines

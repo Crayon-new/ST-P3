@@ -391,3 +391,84 @@ class Progress(BaseCost):
             subcost2 = ((trajs - target_points) ** 2).sum(dim=-1)
 
         return (subcost2 - subcost1) * self.factor
+
+class UncCost(nn.Module):
+    def __init__(self, cfg):
+        super(UncCost, self).__init__()
+        self.cfg = cfg
+
+        dx, bx, _ = gen_dx_bx(self.cfg.LIFT.X_BOUND, self.cfg.LIFT.Y_BOUND, self.cfg.LIFT.Z_BOUND)
+        dx, bx = dx[:2], bx[:2]
+        self.dx = nn.Parameter(dx,requires_grad=False)
+        self.bx = nn.Parameter(bx,requires_grad=False)
+
+        _,_, self.bev_dimension = calculate_birds_eye_view_parameters(
+            cfg.LIFT.X_BOUND, cfg.LIFT.Y_BOUND, cfg.LIFT.Z_BOUND
+        )
+
+        self.W = cfg.EGO.WIDTH
+        self.H = cfg.EGO.HEIGHT
+        self._lambda = cfg.COST_FUNCTION.LAMBDA
+        self.factor = 1
+
+    def get_origin_points(self, lambda_=0):
+        W = self.W
+        H = self.H
+        pts = np.array([
+            [-H / 2. + 0.5 - lambda_, W / 2. + lambda_],
+            [H / 2. + 0.5 + lambda_, W / 2. + lambda_],
+            [H / 2. + 0.5 + lambda_, -W / 2. - lambda_],
+            [-H / 2. + 0.5 - lambda_, -W / 2. - lambda_],
+        ])
+        pts = (pts - self.bx.cpu().numpy()) / (self.dx.cpu().numpy())
+        pts[:, [0, 1]] = pts[:, [1, 0]]
+        rr , cc = polygon(pts[:,1], pts[:,0])
+        rc = np.concatenate([rr[:,None], cc[:,None]], axis=-1)
+        return torch.from_numpy(rc).to(device=self.bx.device) # (27,2)
+
+    def get_points(self, trajs, lambda_=0):
+        '''
+        trajs: torch.Tensor<float> (B, N, n_future, 2)
+        return:
+        List[ torch.Tensor<int> (B, N, n_future), torch.Tensor<int> (B, N, n_future)]
+        '''
+        rc = self.get_origin_points(lambda_)
+        B, N, n_future, _ = trajs.shape
+
+        trajs = trajs.view(B, N, n_future, 1, 2) / self.dx
+        trajs[:,:,:,:,[0,1]] = trajs[:,:,:,:,[1,0]]
+        trajs = trajs + rc
+
+        rr = trajs[:,:,:,:,0].long()
+        rr = torch.clamp(rr, 0, self.bev_dimension[0] - 1)
+
+        cc = trajs[:,:,:,:,1].long()
+        cc = torch.clamp(cc, 0, self.bev_dimension[1] - 1)
+
+        return rr, cc 
+    def compute(self, uncertainty, trajs, _lambda=0):
+        '''
+        uncertainty: torch.Tensor<float> (B, n_future, 200, 200)
+        trajs: torch.Tensor<float> (B, N, n_future, 2)
+        '''
+        _lambda = int(_lambda / self.dx[0])
+        rr, cc = self.get_points(trajs, _lambda)
+        B, N, n_future,_ = trajs.shape
+
+        ii = torch.arange(B)
+        kk = torch.arange(n_future)
+        subcost = uncertainty[ii[:, None, None, None], kk[None, None, :, None], rr, cc].sum(dim=-1)
+
+        return subcost 
+
+    def forward(self, trajs, uncertainty):
+        '''
+        trajs: torch.Tensor<float> (B, N, n_future, 2)   N: sample number
+        uncertainty: torch.Tensor<float> (B, n_future, 200, 200)
+        ego_velocity: torch.Tensor<float> (B, N, n_future)
+        '''
+        B, N, n_future, _ = trajs.shape
+        trajs = trajs * torch.tensor([-1, 1], device=trajs.device)
+        subcost = self.compute(uncertainty[:, :n_future, 0], trajs, _lambda=self._lambda)
+
+        return subcost * self.factor
