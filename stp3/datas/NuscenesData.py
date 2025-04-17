@@ -108,7 +108,7 @@ class FuturePredictionDataset(torch.utils.data.Dataset):
             if scene_no in scenes:
                 scenes.remove(scene_no)
 
-        if self.cfg.DATASET.USE_PARTIAL:
+        if self.cfg.DATASET.USE_PARTIAL and self.is_train == 0:
             import random
             random.seed(10)
             random.shuffle(scenes)

@@ -186,11 +186,11 @@ class TrajectoryTransformer(nn.Module):
         # 合并各时刻结果
         optimized_traj = torch.stack(optimized_traj, dim=1)  # (B,6,2)
         # 可以加一个限制
-        return traj + optimized_traj
+        return traj * torch.tensor([-1, 1], device=traj.device) + optimized_traj
 
 if __name__ == '__main__':
     # importlib.import_module('stp3.models.transformer')
-    importlib.import_module('mmdet.models.utils')
+    # importlib.import_module('mmdet.models.utils')
     traj = torch.randn(2, 6, 2) # B, T, 2
     uncertainty = torch.randn(2, 6, 1, 200, 200) # B, T, 1, 200, 200
     traj_finetuner = TrajectoryTransformer(32)

@@ -8,11 +8,11 @@ import matplotlib
 from matplotlib import pyplot as plt
 from stp3.utils.network import NormalizeInverse
 from stp3.utils.visualisation import make_contour
-
+from stp3.utils.network import preprocess_batch, NormalizeInverse, convert_belief_to_output_and_uncertainty
 import numpy as np
 import torch.nn
 from sklearn.metrics import *
-
+import matplotlib.cm as cm
 import cv2, os
 
 colors = torch.tensor([
@@ -144,11 +144,10 @@ def save_pred(pred, labels, out_path):
 
     return pred, labels
 
-
 def save_stp3(output, labels, batch, n_present, frame, save_path):
-    hdmap = output['hdmap'].detach()
+    # hdmap = output['hdmap'].detach()
     segmentation = output['segmentation'][:, n_present - 1].detach()
-    pedestrian = output['pedestrian'][:, n_present - 1].detach()
+    # pedestrian = output['pedestrian'][:, n_present - 1].detach()
     gt_trajs = labels['gt_trajectory']
     images = batch['image']
 
@@ -202,39 +201,38 @@ def save_stp3(output, labels, batch, n_present, frame, save_path):
 
     plt.subplot(gs[:, 3])
     showing = torch.zeros((200, 200, 3)).numpy()
-    showing[:, :] = np.array([219 / 255, 215 / 255, 215 / 255])
+    showing[:, :] = np.array([255 / 255, 255 / 255, 255 / 255])
 
     hdmap = labels['hdmap'].detach()
-    # lane
+    # drivable
     area = hdmap[0, 0:2][1].cpu().numpy()
+    hdmap_index = area > 0
+    showing[hdmap_index] = np.array([196 / 255, 211 / 255, 225 / 255])
+    showing = showing*255
+
+    # lane
+    area = hdmap[0, 0:2][0].cpu().numpy()
     hdmap_index = area > 0
     showing[hdmap_index] = np.array([161 / 255, 158 / 255, 158 / 255])
 
-    # drivable
-    area = hdmap[0, 0:2][0].cpu().numpy()
-    hdmap_index = area > 0
-    showing[hdmap_index] = np.array([84 / 255, 70 / 255, 70 / 255])
-
-    # # drivable
-    # area = torch.argmax(hdmap[0, 2:4], dim=0).cpu().numpy()
-    # hdmap_index = area > 0
-    # showing[hdmap_index] = np.array([161 / 255, 158 / 255, 158 / 255])
-
-    # # lane
-    # area = torch.argmax(hdmap[0, 0:2], dim=0).cpu().numpy()
-    # hdmap_index = area > 0
-    # showing[hdmap_index] = np.array([84 / 255, 70 / 255, 70 / 255])
 
     # semantic
-    semantic_seg = torch.argmax(segmentation[0], dim=0).cpu().numpy()
-    semantic_index = semantic_seg > 0
-    showing[semantic_index] = np.array([255 / 255, 128 / 255, 0 / 255])
+    # segmentation = labels['segmentation'][:, n_present - 1].detach()
+    # semantic_seg = segmentation[0][0].cpu().numpy()
+    # semantic_index = semantic_seg > 0
+    # showing[semantic_index] = np.array([255 / 255, 128 / 255, 0 / 255])
+    if 'target_prediction_result' in labels:
+        label_contour = make_contour(labels['target_prediction_result'])
+        white_pixels = np.all(label_contour == [255, 255, 255], axis=-1)
+        label_contour[white_pixels] = showing[white_pixels]
+        plt.imshow(label_contour)
+    else:
+        segmentation = labels['segmentation'][:, n_present - 1].detach()
+        semantic_seg = segmentation[0][0].cpu().numpy()
+        semantic_index = semantic_seg > 0
+        showing[semantic_index] = np.array([255 / 255, 128 / 255, 0 / 255]) 
 
-    pedestrian_seg = torch.argmax(pedestrian[0], dim=0).cpu().numpy()
-    pedestrian_index = pedestrian_seg > 0
-    showing[pedestrian_index] = np.array([28 / 255, 81 / 255, 227 / 255])
-
-    plt.imshow(make_contour(showing))
+    # plt.imshow(make_contour(showing))
     plt.axis('off')
 
     bx = np.array([-50.0 + 0.5/2.0, -50.0 + 0.5/2.0])
@@ -268,7 +266,6 @@ def save_stp3(output, labels, batch, n_present, frame, save_path):
     plt.close()
 
 def save_robio(output, labels, batch, n_present, frame, save_path):
-    gt_trajs = labels['gt_trajectory'].cpu()
     if 'pred_trajectory' in output:
         gt_trajs = output['pred_trajectory'].detach().cpu()
     # add self point
@@ -323,69 +320,47 @@ def save_robio(output, labels, batch, n_present, frame, save_path):
     plt.imshow(showing)
     plt.axis('off')
 
-    # plt.subplot(gs[2:4, 0])
-    # showing = torch.zeros((200, 200, 3)).numpy()
-    # showing[:, :] = np.array([219 / 255, 215 / 255, 215 / 255])
-
-    # # drivable
-    # if output['hdmap'] is not None:
-    #     hdmap = output['hdmap'].detach()
-    #     area = torch.argmax(hdmap[0, 2:4], dim=0).cpu().numpy()
-    #     hdmap_index = area > 0
-    #     showing[hdmap_index] = np.array([161 / 255, 158 / 255, 158 / 255])
-
-    #     # lane
-    #     area = torch.argmax(hdmap[0, 0:2], dim=0).cpu().numpy()
-    #     hdmap_index = area > 0
-    #     showing[hdmap_index] = np.array([84 / 255, 70 / 255, 70 / 255])
-    # else:
-    #     hdmap = labels['hdmap'].detach()
-    #     # lane
-    #     area = hdmap[0, 0:2][1].cpu().numpy()
-    #     hdmap_index = area > 0
-    #     showing[hdmap_index] = np.array([161 / 255, 158 / 255, 158 / 255])
-
-    #     # drivable
-    #     area = hdmap[0, 0:2][0].cpu().numpy()
-    #     hdmap_index = area > 0
-    #     showing[hdmap_index] = np.array([84 / 255, 70 / 255, 70 / 255])
-
     # semantic
     if output['segmentation'] is not None:
-        output['segmentation'], output['seg_uncertainty'] = convert_belief_to_output_and_uncertainty(output['segmentation'])
-        segmentation = output['segmentation'][:, n_present - 1].detach()
-        seg_uncertainty = output['seg_uncertainty'][:, n_present - 1].detach()
-        # semantic_seg = torch.argmax(segmentation[0], dim=0).cpu().numpy()
-        # semantic_index = semantic_seg > 0
-        # showing[semantic_index] = np.array([255 / 255, 128 / 255, 0 / 255])
+        showing = torch.zeros((200, 200, 3)).numpy()
+        showing[:, :] = np.array([219 / 255, 215 / 255, 215 / 255])
 
-    # if output['pedestrian'] is not None:
-    #     pedestrian = output['pedestrian'][:, n_present - 1].detach()
-    #     pedestrian_seg = torch.argmax(pedestrian[0], dim=0).cpu().numpy()
-    #     pedestrian_index = pedestrian_seg > 0
-    #     showing[pedestrian_index] = np.array([28 / 255, 81 / 255, 227 / 255])
+        hdmap = labels['hdmap'].detach()
+        # drivable
+        area = hdmap[0, 0:2][1].cpu().numpy()
+        hdmap_index = area > 0
+        showing[hdmap_index] = np.array([196 / 255, 211 / 255, 225 / 255])
 
-    # plt.imshow(make_contour(showing))
-    # plt.axis('off')
+        # lane
+        area = hdmap[0, 0:2][0].cpu().numpy()
+        hdmap_index = area > 0
+        showing[hdmap_index] = np.array([161 / 255, 158 / 255, 158 / 255])
 
-    bx = np.array([-50.0 + 0.5 / 2.0, -50.0 + 0.5 / 2.0])
-    dx = np.array([0.5, 0.5])
-    w, h = 1.85, 4.084
-    pts = np.array([
-        [-h / 2. + 0.5, w / 2.],
-        [h / 2. + 0.5, w / 2.],
-        [h / 2. + 0.5, -w / 2.],
-        [-h / 2. + 0.5, -w / 2.],
-    ])
-    pts = (pts - bx) / dx
-    pts[:, [0, 1]] = pts[:, [1, 0]]
-    plt.fill(pts[:, 0], pts[:, 1], '#76b900')
+        plt.subplot(gs[2:4, 0])
+        segmentation, _= convert_belief_to_output_and_uncertainty(output['segmentation'])
+        segmentation = segmentation[:, n_present - 1].detach()
+        semantic_seg = torch.argmax(segmentation[0], dim=0).cpu().numpy()
+        semantic_index = semantic_seg > 0
+        showing[semantic_index] = np.array([255 / 255, 128 / 255, 0 / 255])
 
-    # plt.xlim((200, 0))
-    # plt.ylim((0, 200))
-    # gt_trajs[0, :, :1] = gt_trajs[0, :, :1] * -1
-    # gt_trajs = (gt_trajs[0, :, :2].cpu().numpy() - bx) / dx
-    # plt.plot(gt_trajs[:, 0], gt_trajs[:, 1], linewidth=3.0)
+        plt.imshow(make_contour(showing))
+        plt.axis('off')
+
+        bx = np.array([-50.0 + 0.5 / 2.0, -50.0 + 0.5 / 2.0])
+        dx = np.array([0.5, 0.5])
+        w, h = 1.85, 4.084
+        pts = np.array([
+            [-h / 2. + 0.5, w / 2.],
+            [h / 2. + 0.5, w / 2.],
+            [h / 2. + 0.5, -w / 2.],
+            [-h / 2. + 0.5, -w / 2.],
+        ])
+        pts = (pts - bx) / dx
+        pts[:, [0, 1]] = pts[:, [1, 0]]
+        plt.fill(pts[:, 0], pts[:, 1], '#76b900')
+
+        plt.xlim((200, 0))
+        plt.ylim((0, 200))
 
     if 'sigma_states' in output:
 
@@ -393,9 +368,11 @@ def save_robio(output, labels, batch, n_present, frame, save_path):
         plt.subplot(gs[4:6, 0])
         plt.annotate('U(t+1)', (0.01, 0.87), c='white', xycoords='axes fraction', fontsize=14)
         # seg_uncertainty = output['seg_uncertainty'][0].detach().cpu().numpy()
-        seg_uncertainty = output['UQ'].detach().cpu().numpy()
-        n_present -= 3 # past uncertainty
-        seg_uncertainty = np.mean(seg_uncertainty[n_present-1], axis=0)
+        # seg_uncertainty = output['UQ'].detach().cpu().numpy()
+        # n_present -= 3 # past uncertainty
+        _, uncertainty = convert_belief_to_output_and_uncertainty(output['segmentation'])
+        uncertainty = uncertainty[0].detach().cpu().numpy()
+        seg_uncertainty = np.mean(uncertainty[n_present+1], axis=0)
         cmap = cm.ScalarMappable(cmap='viridis')
         colormap_array = cmap.to_rgba(seg_uncertainty)[:,:,:3]
         plt.imshow(make_contour(colormap_array))
@@ -410,8 +387,8 @@ def save_robio(output, labels, batch, n_present, frame, save_path):
         plt.subplot(gs[4:6, 1])
         plt.annotate('U(t+2)', (0.01, 0.87), c='white', xycoords='axes fraction', fontsize=14)
         # seg_uncertainty = output['seg_uncertainty'][0].detach().cpu().numpy() # future uncertainty
-        seg_uncertainty = output['UQ'].detach().cpu().numpy()
-        seg_uncertainty = np.mean(seg_uncertainty[n_present], axis=0)
+        # seg_uncertainty = output['UQ'].detach().cpu().numpy()
+        seg_uncertainty = np.mean(uncertainty[n_present+2], axis=0)
 
         cmap = cm.ScalarMappable(cmap='viridis')
         colormap_array = cmap.to_rgba(seg_uncertainty)[:,:,:3]
@@ -427,8 +404,8 @@ def save_robio(output, labels, batch, n_present, frame, save_path):
         plt.subplot(gs[4:6, 2])
         plt.annotate('U(t+3)', (0.01, 0.87), c='white', xycoords='axes fraction', fontsize=14)
         # seg_uncertainty = output['seg_uncertainty'][0].detach().cpu().numpy()
-        seg_uncertainty = output['UQ'].detach().cpu().numpy()
-        seg_uncertainty = np.mean(seg_uncertainty[n_present+1], axis=0)
+        # seg_uncertainty = output['UQ'].detach().cpu().numpy()
+        seg_uncertainty = np.mean(uncertainty[n_present+3], axis=0)
         cmap = cm.ScalarMappable(cmap='viridis')
         colormap_array = cmap.to_rgba(seg_uncertainty)[:,:,:3]
         plt.imshow(make_contour(colormap_array))
@@ -441,61 +418,83 @@ def save_robio(output, labels, batch, n_present, frame, save_path):
         plt.ylim((0, 200))
 
     if 'target_prediction_result' in labels:
-        plt.subplot(gs[2:4, 1])
-        plt.annotate('GT', (0.01, 0.87), c='black', xycoords='axes fraction', fontsize=14)
-        plt.imshow(make_contour(labels['target_prediction_result']))
-        plt.axis('off')
+        showing = torch.zeros((200, 200, 3)).numpy()
+        showing[:, :] = np.array([255 / 255, 255 / 255, 255 / 255])
 
-        plt.fill(pts[:, 0], pts[:, 1], '#76b900')
+        hdmap = labels['hdmap'].detach()
+        # drivable
+        area = hdmap[0, 0:2][1].cpu().numpy()
+        hdmap_index = area > 0
+        showing[hdmap_index] = np.array([196 / 255, 211 / 255, 225 / 255])
+        showing = showing*255
+        # # lane
+        # area = hdmap[0, 0:2][0].cpu().numpy()
+        # hdmap_index = area > 0
+        # showing[hdmap_index] = np.array([161 / 255, 158 / 255, 158 / 255])
+
+        plt.subplot(gs[2:4, 1])
+        label_contour = make_contour(labels['target_prediction_result'])
+        white_pixels = np.all(label_contour == [255, 255, 255], axis=-1)
+        label_contour[white_pixels] = showing[white_pixels]
+        # plt.annotate('', (0.01, 0.87), c='black', xycoords='axes fraction', fontsize=14)
+        plt.imshow(label_contour)
+        plt.axis('off')
 
         plt.xlim((200, 0))
         plt.ylim((0, 200))
 
-    # # groud truth representations
-    # hdmap = labels['hdmap'].detach()
-
-    # plt.subplot(gs[2:4, 1])
-    # showing = torch.zeros((200, 200, 3)).numpy()
-    # showing[:, :] = np.array([219 / 255, 215 / 255, 215 / 255])
-
-    # # lane
-    # area = hdmap[0, 0:2][1].cpu().numpy()
-    # hdmap_index = area > 0
-    # showing[hdmap_index] = np.array([161 / 255, 158 / 255, 158 / 255])
-
-    # # drivable
-    # area = hdmap[0, 0:2][0].cpu().numpy()
-    # hdmap_index = area > 0
-    # showing[hdmap_index] = np.array([84 / 255, 70 / 255, 70 / 255])
-
-    # # semantic
-    # segmentation = labels['segmentation'][:, n_present - 1].detach()
-    # semantic_seg = segmentation[0][0].cpu().numpy()
-    # semantic_index = semantic_seg > 0
-    # showing[semantic_index] = np.array([255 / 255, 128 / 255, 0 / 255])
-
-    # if 'pedestrain' in labels and labels['pedestrian'] is not None:
-    #     pedestrian = labels['pedestrian'][:, n_present - 1].detach()
-    #     pedestrian_seg = pedestrian[0][0].cpu().numpy()
-    #     pedestrian_index = pedestrian_seg > 0
-    #     showing[pedestrian_index] = np.array([28 / 255, 81 / 255, 227 / 255])
-
-    # plt.imshow(make_contour(showing))
-    # plt.axis('off')
-
-    # plt.fill(pts[:, 0], pts[:, 1], '#76b900')
-
-    # plt.xlim((200, 0))
-    # plt.ylim((0, 200))
-
     # plt.plot(gt_trajs[:, 0], gt_trajs[:, 1], linewidth=3.0)
-
     if 'prediction_np_result' in output:
         plt.subplot(gs[2:4, 0])
         plt.annotate('Pred', (0.01, 0.87), c='black', xycoords='axes fraction', fontsize=14)
         plt.imshow(make_contour(output['prediction_np_result'][::-1, ::-1]))
         plt.axis('off')
-        plt.fill(pts[:, 0], pts[:, 1], '#76b900')
 
-    plt.savefig(save_path / ('%04d.png' % frame))
+    if 'pred_trajectory' in output:
+        pred_trajs = output['pred_trajectory'].detach().cpu()
+        # add self point
+        pred_trajs = torch.cat([torch.zeros((1, 1, 3)), pred_trajs], dim=1)
+        pred_trajs[0, :, :1] = pred_trajs[0, :, :1] * -1
+        pred_trajs = (pred_trajs[0, :, :2].cpu().numpy() - bx) / dx
+        plt.plot(pred_trajs[:, 0], pred_trajs[:, 1], linewidth=3.0, c='r', alpha=1) 
+        
+        # 最后画出自车
+        plt.fill(pts[:, 0], pts[:, 1], '#76b900', zorder=3)
+
+ 
+    if 'target_prediction_result' in labels:
+        showing = torch.zeros((200, 200, 3)).numpy()
+        showing[:, :] = np.array([255 / 255, 255 / 255, 255 / 255])
+        plt.subplot(gs[2:4, 2])
+
+        hdmap = labels['hdmap'].detach()
+        # drivable
+        area = hdmap[0, 0:2][1].cpu().numpy()
+        hdmap_index = area > 0
+        showing[hdmap_index] = np.array([196 / 255, 211 / 255, 225 / 255])
+        showing = showing*255
+
+        # # lane
+        # area = hdmap[0, 0:2][0].cpu().numpy()
+        # hdmap_index = area > 0
+        # showing[hdmap_index] = np.array([161 / 255, 158 / 255, 158 / 255]) 
+        label_contour = make_contour(labels['target_prediction_result'])
+        white_pixels = np.all(label_contour == [255, 255, 255], axis=-1)
+        label_contour[white_pixels] = showing[white_pixels]
+        # plt.annotate('', (0.01, 0.87), c='black', xycoords='axes fraction', fontsize=14)
+        plt.imshow(label_contour)
+
+        plt.xlim((200, 0))
+        plt.ylim((0, 200))
+
+        # add self point
+        gt_trajs = labels['gt_trajectory'].cpu()
+        gt_trajs = torch.cat([torch.zeros((1, 1, 3)), gt_trajs], dim=1)
+        gt_trajs[0, :, :1] = gt_trajs[0, :, :1] * -1
+        gt_trajs = (gt_trajs[0, :, :2].cpu().numpy() - bx) / dx
+        plt.plot(gt_trajs[:, 0], gt_trajs[:, 1], linewidth=3.0, c='b', alpha=1) 
+        plt.axis('off')
+        plt.fill(pts[:, 0], pts[:, 1], '#76b900', zorder=3)
+
+    plt.savefig(save_path / ('%04d_unc.png' % frame))
     plt.close()

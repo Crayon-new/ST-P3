@@ -45,9 +45,9 @@ def eval(checkpoint_path, dataroot, version):
     cfg.DATASET.MAP_FOLDER = dataroot
     cfg.DATASET.VERSION = version
 
-    cfg.DATASET.USE_CORRUPTION = True
-    cfg.DATASET.CORRUPTION_TYPE = 'Fog'
-    cfg.DATASET.CORRUPTION_LEVEL = 'mid'
+    cfg.DATASET.USE_CORRUPTION = False
+    cfg.DATASET.CORRUPTION_TYPE = 'LowLight'
+    cfg.DATASET.CORRUPTION_LEVEL = 'easy'
     cfg.DATASET.CORRUPTION_DATAROOT = 'data/nuScenes-c'
 
     cfg.MODEL.TEST_SAMPLE_NUM = 100
@@ -69,8 +69,6 @@ def eval(checkpoint_path, dataroot, version):
         iou_metrics[key] = IntersectionOverUnion(n_classes).to(device)
 
     for i, batch in enumerate(tqdm((valloader))):
-        if i>50:
-            break
         preprocess_batch(batch, device)
         image = batch['image']
         intrinsics = batch['intrinsics']
@@ -102,8 +100,8 @@ def eval(checkpoint_path, dataroot, version):
                                   labels['instance'][..., limits, limits][:, n_present-1:].contiguous()
                                   )
 
-            iou_metrics[key](segmentation_pred[..., limits, limits].contiguous(),
-                             labels['segmentation'][..., limits, limits].contiguous()
+            iou_metrics[key](segmentation_pred[:, 2:][..., limits, limits].contiguous(),
+                             labels['segmentation'][:, 2:][..., limits, limits].contiguous()
                              )
 
     results = {}

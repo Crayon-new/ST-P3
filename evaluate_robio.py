@@ -16,11 +16,12 @@ from stp3.trainer import TrainingModule
 from stp3.metrics import IntersectionOverUnion, PanopticMetric, PlanningMetric
 from stp3.utils.network import preprocess_batch, NormalizeInverse, convert_belief_to_output_and_uncertainty
 from stp3.utils.instance import predict_instance_segmentation_and_trajectories
-from stp3.utils.visualisation import make_contour, plot_prediction
+from stp3.utils.visualisation import make_contour, plot_prediction, save_imgs_only
 from stp3.config import get_cfg
 import matplotlib.cm as cm
 from scipy import ndimage
 import importlib
+from evaluate_helper import save_stp3, save_robio, roc_pr
 
 def mk_save_dir(debug_mode):
     now = datetime.datetime.now()
@@ -33,9 +34,8 @@ def mk_save_dir(debug_mode):
     return save_path
 
 def eval(checkpoint_path, dataroot, debug_mode=False):
-    save_path = mk_save_dir(debug_mode)
 
-    trainer = TrainingModule.load_from_checkpoint(checkpoint_path, strict=True)
+    trainer = TrainingModule.load_from_checkpoint(checkpoint_path, strict=False)
     print(f'Loaded weights from \n {checkpoint_path}')
     trainer.eval()
 
@@ -52,10 +52,12 @@ def eval(checkpoint_path, dataroot, debug_mode=False):
 
     cfg.MODEL.SAMPLE_RESULTS = True
 
-    cfg.DATASET.USE_CORRUPTION = True
+    cfg.DATASET.USE_CORRUPTION = False
     cfg.DATASET.CORRUPTION_TYPE = 'Snow'
-    cfg.DATASET.CORRUPTION_LEVEL = 'mid'
+    cfg.DATASET.CORRUPTION_LEVEL = 'hard'
     cfg.DATASET.CORRUPTION_DATAROOT = 'data/nuScenes-c'
+    # cfg.DATASET.VERSION = 'trainval'
+    cfg.PLANNING.SAMPLE_NUM = 3600
 
     cfg.MODEL.TEST_SAMPLE_NUM = 100
 
@@ -88,8 +90,12 @@ def eval(checkpoint_path, dataroot, debug_mode=False):
         for i in range(future_second):
             metric_planning_val.append(PlanningMetric(cfg, 2*(i+1)).to(device))
 
-
+    uncertainty = []
+    uncertainty_labels = []
+    save_path = mk_save_dir(debug_mode)
     for index, batch in enumerate(tqdm(valloader)):
+        # if index == 150:
+        #     break
         preprocess_batch(batch, device)
         image = batch['image']
         intrinsics = batch['intrinsics']
@@ -101,15 +107,20 @@ def eval(checkpoint_path, dataroot, debug_mode=False):
         B = len(image)
         labels = trainer.prepare_future_labels(batch)
 
+        n_present = model.receptive_field
+        # save_imgs_only(batch, n_present, save_path, index, command)
+        # continue
+
         with torch.no_grad():
             output = model(
                 image, intrinsics, extrinsics, future_egomotion
             )
 
-        n_present = model.receptive_field
-
         # semantic segmentation metric
-        seg_prediction = output['segmentation'].detach()
+        if 'segmentation' in output:
+            seg_prediction = output['segmentation'].detach()
+        else:
+            seg_prediction = output['proposal_segmentation'].detach() 
         seg_prediction = torch.argmax(seg_prediction, dim=2, keepdim=True)
         metric_vehicle_val(seg_prediction[:, n_present - 1:], labels['segmentation'][:, n_present - 1:])
 
@@ -129,16 +140,16 @@ def eval(checkpoint_path, dataroot, debug_mode=False):
 
         if cfg.INSTANCE_SEG.ENABLED:
             pred_consistent_instance_seg, matched_centers= predict_instance_segmentation_and_trajectories(
-                output, compute_matched_centers=True, make_consistent=True
+                output, n_present, compute_matched_centers=True, make_consistent=True
             )
-            metric_panoptic_val(pred_consistent_instance_seg[:, n_present - 1:],
+            metric_panoptic_val(pred_consistent_instance_seg,
                                      labels['instance'][:, n_present - 1:])
             output['prediction_np_result'] = plot_prediction(pred_consistent_instance_seg, matched_centers)
 
-            target_consistent_instance_seg, target_matched_centers= predict_instance_segmentation_and_trajectories(
-                labels, compute_matched_centers=True, make_consistent=True
-            )
-            labels['target_prediction_result'] = plot_prediction(target_consistent_instance_seg, target_matched_centers)
+        target_consistent_instance_seg, target_matched_centers= predict_instance_segmentation_and_trajectories(
+            labels, n_present, compute_matched_centers=True, make_consistent=True
+        )
+        labels['target_prediction_result'] = plot_prediction(target_consistent_instance_seg, target_matched_centers)
 
         if cfg.PLANNING.ENABLED:
             occupancy = torch.logical_or(seg_prediction, pedestrian_prediction)
@@ -150,21 +161,42 @@ def eval(checkpoint_path, dataroot, debug_mode=False):
                 semantic_pred=occupancy[:, n_present:].squeeze(2),
                 hd_map=output['hdmap'].detach(),
                 commands=command,
-                target_points=target_points
+                target_points=target_points,
+                segmentation = output['segmentation'].detach()
             )
-            occupancy = torch.logical_or(labels['segmentation'][:, n_present:].squeeze(2),
-                                         labels['pedestrian'][:, n_present:].squeeze(2))
+            # final_traj = output['traj_pred']
+            output = {**output, 'pred_trajectory': final_traj}
+            occupancy = labels['segmentation'][:, n_present:].squeeze(2)
+            if cfg.SEMANTIC_SEG.PEDESTRIAN.ENABLED:
+                occupancy = torch.logical_or(labels['segmentation'][:, n_present:].squeeze(2),
+                                            labels['pedestrian'][:, n_present:].squeeze(2))
             for i in range(future_second):
                 cur_time = (i+1)*2
+                _trajs = final_traj[:,:cur_time].detach()
+                _gt_traj = labels['gt_trajectory'][:,1:cur_time+1]
+                _,a = metric_planning_val[i].evaluate_coll(_trajs[:,:,:2], _gt_traj[:,:,:2], occupancy[:,:cur_time])
+                if a.any():
+                    # save_stp3(output, labels, batch, n_present, index, save_path)
+                    save_robio(output, labels, batch, n_present, index, save_path)
+                    with open ('/home2/huangzj/github_respo/ST-P3/cache/collision.txt', 'a') as f:
+                        f.write(str(index)+': ')
+                        f.write("{}s".format(i+1)+'collision\n')
                 metric_planning_val[i](final_traj[:,:cur_time].detach(), labels['gt_trajectory'][:,1:cur_time+1], occupancy[:,:cur_time])
+            
 
-        if index %5 == 0:
-            if cfg.PLANNING.ENABLED:
-                output = {**output, 'pred_trajectory': final_traj}
-            save(output, labels, batch, n_present, index, save_path)
-
-
+        # uncertainty.append(output['UQ'].squeeze())
+        # tmp_unc_label = (labels['segmentation'] != seg_prediction).to(output['UQ'].dtype).squeeze()
+        # uncertainty_labels.append(tmp_unc_label)
+        
+        # if index % 1 == 0:
+        #     if cfg.PLANNING.ENABLED:
+                # save_stp3(output, labels, batch, n_present, index, save_path)
+                # save_robio(output, labels, batch, n_present, index, save_path)
     results = {}
+    # uncertainty_labels = torch.stack(uncertainty_labels, dim=0)
+    # uncertainty = torch.stack(uncertainty, dim=0)
+    # fpr, tpr, rec, pr, auroc, aupr, no_skill = roc_pr(uncertainty, uncertainty_labels)
+    # print("auroc: {}, aupr: {}, no_skill:{}".format(auroc, aupr, no_skill))
 
     scores = metric_vehicle_val.compute()
     results['vehicle_iou'] = scores[1]
@@ -192,206 +224,11 @@ def eval(checkpoint_path, dataroot, debug_mode=False):
     for key, value in results.items():
         print(f'{key} : {value.item()}')
 
-def save(output, labels, batch, n_present, frame, save_path):
-    gt_trajs = labels['gt_trajectory'].cpu()
-    if 'pred_trajectory' in output:
-        gt_trajs = output['pred_trajectory'].detach().cpu()
-    # add self point
-    gt_trajs = torch.cat([torch.zeros((1, 1, 3)), gt_trajs], dim=1)
-    images = batch['image']
-
-    denormalise_img = torchvision.transforms.Compose(
-        (NormalizeInverse(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-         torchvision.transforms.ToPILImage(),)
-    )
-
-    val_w = 2.99
-    val_h = 2.99 * (224. / 480.)
-    plt.figure(1, figsize=(3 * val_w, 6 * val_h))
-    width_ratios = (val_w, val_w, val_w)
-    gs = matplotlib.gridspec.GridSpec(6, 3, width_ratios=width_ratios)
-    gs.update(wspace=0.0, hspace=0.0, left=0.0, right=1.0, top=1.0, bottom=0.0)
-
-    plt.subplot(gs[0, 0])
-    plt.annotate('FRONT LEFT', (0.01, 0.87), c='white', xycoords='axes fraction', fontsize=14)
-    plt.imshow(denormalise_img(images[0, n_present - 1, 0].cpu()))
-    plt.axis('off')
-
-    plt.subplot(gs[0, 1])
-    plt.annotate('FRONT', (0.01, 0.87), c='white', xycoords='axes fraction', fontsize=14)
-    plt.imshow(denormalise_img(images[0, n_present - 1, 1].cpu()))
-    plt.axis('off')
-
-    plt.subplot(gs[0, 2])
-    plt.annotate('FRONT RIGHT', (0.01, 0.87), c='white', xycoords='axes fraction', fontsize=14)
-    plt.imshow(denormalise_img(images[0, n_present - 1, 2].cpu()))
-    plt.axis('off')
-
-    plt.subplot(gs[1, 0])
-    plt.annotate('BACK LEFT', (0.01, 0.87), c='white', xycoords='axes fraction', fontsize=14)
-    showing = denormalise_img(images[0, n_present - 1, 3].cpu())
-    showing = showing.transpose(Image.FLIP_LEFT_RIGHT)
-    plt.imshow(showing)
-    plt.axis('off')
-
-    plt.subplot(gs[1, 1])
-    plt.annotate('BACK', (0.01, 0.87), c='white', xycoords='axes fraction', fontsize=14)
-    showing = denormalise_img(images[0, n_present - 1, 4].cpu())
-    showing = showing.transpose(Image.FLIP_LEFT_RIGHT)
-    plt.imshow(showing)
-    plt.axis('off')
-
-    plt.subplot(gs[1, 2])
-    plt.annotate('BACK_RIGHT', (0.01, 0.87), c='white', xycoords='axes fraction', fontsize=14)
-    showing = denormalise_img(images[0, n_present - 1, 5].cpu())
-    showing = showing.transpose(Image.FLIP_LEFT_RIGHT)
-    plt.imshow(showing)
-    plt.axis('off')
-
-    plt.subplot(gs[2:4, 0])
-    showing = torch.zeros((200, 200, 3)).numpy()
-    showing[:, :] = np.array([219 / 255, 215 / 255, 215 / 255])
-
-    # drivable
-    if output['hdmap'] is not None:
-        hdmap = output['hdmap'].detach()
-        area = torch.argmax(hdmap[0, 2:4], dim=0).cpu().numpy()
-        hdmap_index = area > 0
-        showing[hdmap_index] = np.array([161 / 255, 158 / 255, 158 / 255])
-
-        # lane
-        area = torch.argmax(hdmap[0, 0:2], dim=0).cpu().numpy()
-        hdmap_index = area > 0
-        showing[hdmap_index] = np.array([84 / 255, 70 / 255, 70 / 255])
-    else:
-        hdmap = labels['hdmap'].detach()
-        # lane
-        area = hdmap[0, 0:2][1].cpu().numpy()
-        hdmap_index = area > 0
-        showing[hdmap_index] = np.array([161 / 255, 158 / 255, 158 / 255])
-
-        # drivable
-        area = hdmap[0, 0:2][0].cpu().numpy()
-        hdmap_index = area > 0
-        showing[hdmap_index] = np.array([84 / 255, 70 / 255, 70 / 255])
-
-    plt.imshow(make_contour(showing))
-    plt.axis('off')
-
-    bx = np.array([-50.0 + 0.5 / 2.0, -50.0 + 0.5 / 2.0])
-    dx = np.array([0.5, 0.5])
-    w, h = 1.85, 4.084
-    pts = np.array([
-        [-h / 2. + 0.5, w / 2.],
-        [h / 2. + 0.5, w / 2.],
-        [h / 2. + 0.5, -w / 2.],
-        [-h / 2. + 0.5, -w / 2.],
-    ])
-    pts = (pts - bx) / dx
-    pts[:, [0, 1]] = pts[:, [1, 0]]
-    plt.fill(pts[:, 0], pts[:, 1], '#76b900')
-
-    plt.xlim((200, 0))
-    plt.ylim((0, 200))
-    gt_trajs[0, :, :1] = gt_trajs[0, :, :1] * -1
-    gt_trajs = (gt_trajs[0, :, :2].cpu().numpy() - bx) / dx
-    plt.plot(gt_trajs[:, 0], gt_trajs[:, 1], linewidth=3.0)
-
-    if 'seg_uncertainty' in output:
-
-        # sigma
-        plt.subplot(gs[2:4, 2])
-
-        seg_uncertainty = output['seg_uncertainty'][0].detach().cpu().numpy()
-        seg_uncertainty = np.mean(seg_uncertainty[n_present - 1], axis=0)
-        cmap = cm.ScalarMappable(cmap='viridis')
-        colormap_array = cmap.to_rgba(seg_uncertainty)[:,:,:3]
-        plt.imshow(make_contour(colormap_array))
-        plt.axis('off')
-
-
-        plt.fill(pts[:, 0], pts[:, 1], '#76b900')
-        plt.xlim((200, 0))
-        plt.ylim((0, 200))
-    if 'UQ' in output:
-        plt.subplot(gs[4:6, 2])
-
-        uq = output['UQ'][n_present - 1:n_present].detach().cpu().numpy()
-        cmap = cm.ScalarMappable(cmap='viridis')
-        colormap_array = cmap.to_rgba(uq)[0][0][:,:,:3]
-        plt.imshow(make_contour(colormap_array))
-        plt.axis('off')
-
-        plt.fill(pts[:, 0], pts[:, 1], '#76b900')
-
-        plt.xlim((200, 0))
-        plt.ylim((0, 200))
-
-    if 'target_prediction_result' in labels:
-        plt.subplot(gs[4:6, 1])
-        plt.imshow(labels['target_prediction_result'])
-        plt.axis('off')
-
-        plt.fill(pts[:, 0], pts[:, 1], '#76b900')
-
-        plt.xlim((200, 0))
-        plt.ylim((0, 200))
-
-    # groud truth representations
-    hdmap = labels['hdmap'].detach()
-
-    plt.subplot(gs[2:4, 1])
-    showing = torch.zeros((200, 200, 3)).numpy()
-    showing[:, :] = np.array([219 / 255, 215 / 255, 215 / 255])
-
-    # lane
-    area = hdmap[0, 0:2][1].cpu().numpy()
-    hdmap_index = area > 0
-    showing[hdmap_index] = np.array([161 / 255, 158 / 255, 158 / 255])
-
-    # drivable
-    area = hdmap[0, 0:2][0].cpu().numpy()
-    hdmap_index = area > 0
-    showing[hdmap_index] = np.array([84 / 255, 70 / 255, 70 / 255])
-
-    # semantic
-    segmentation = labels['segmentation'][:, n_present - 1].detach()
-    semantic_seg = segmentation[0][0].cpu().numpy()
-    semantic_index = semantic_seg > 0
-    showing[semantic_index] = np.array([255 / 255, 128 / 255, 0 / 255])
-
-    if 'pedestrain' in labels and labels['pedestrian'] is not None:
-        pedestrian = labels['pedestrian'][:, n_present - 1].detach()
-        pedestrian_seg = pedestrian[0][0].cpu().numpy()
-        pedestrian_index = pedestrian_seg > 0
-        showing[pedestrian_index] = np.array([28 / 255, 81 / 255, 227 / 255])
-
-    plt.imshow(make_contour(showing))
-    plt.axis('off')
-
-    plt.fill(pts[:, 0], pts[:, 1], '#76b900')
-
-    plt.xlim((200, 0))
-    plt.ylim((0, 200))
-
-    plt.plot(gt_trajs[:, 0], gt_trajs[:, 1], linewidth=3.0)
-
-    if 'prediction_np_result' in output:
-        plt.subplot(gs[4:6, 0])
-        plt.imshow(make_contour(output['prediction_np_result'][::-1, ::-1]))
-        plt.axis('off')
-        plt.axis('off')
-
-        plt.fill(pts[:, 0], pts[:, 1], '#76b900')
-
-    plt.savefig(save_path / ('%04d.png' % frame))
-    plt.close()
-
 if __name__ == '__main__':
     parser = ArgumentParser(description='STP3 evaluation')
-    parser.add_argument('--checkpoint', default='last.ckpt', type=str, help='path to checkpoint')
+    parser.add_argument('--checkpoint', default='/home2/huangzj/github_respo/ST-P3/tensorboard_logs/21August2024at08_28_14UTC_gpu-4v100s-36-182_Prediction/default/version_0/checkpoints/epoch=3-step=5917.ckpt', type=str, help='path to checkpoint')
     parser.add_argument('--debug_mode', default=False, type=bool)
-    parser.add_argument('--dataroot', default=None, type=str)
+    parser.add_argument('--dataroot', default='data/nuscene', type=str)
 
     args = parser.parse_args()
     # register module
